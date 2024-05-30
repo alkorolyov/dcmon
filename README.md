@@ -1,5 +1,5 @@
 # dcmon
-DC monitoring for VASTAI
+DC monitoring for VastAI
 
 # Install client part
 
