@@ -8,7 +8,6 @@ apt install docker.io -y
 
 # install docker-compose
 sudo apt-get install docker-compose-plugin
-docker compose up -d # this will start all server
 
 export HOSTNAME=$(hostname)
 docker compose up -d
