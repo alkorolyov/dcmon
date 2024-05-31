@@ -1,7 +1,4 @@
-version: '3.8'
-
 services:
-
   dcgm-exporter:
     image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.6-3.4.2-ubuntu22.04
     container_name: dcgm-exporter
@@ -18,19 +15,6 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
-  # dcgm-exporter:
-  #   image: jjziets/dcgm-exporter:latest
-  #   container_name: dcgm-exporter
-  #   restart: unless-stopped
-  #   ports:
-  #     - "9400:9400"
-  #   cap_add:
-  #     - SYS_ADMIN
-  #   runtime: nvidia
-  #   environment:
-  #     - NVIDIA_VISIBLE_DEVICES=all
-  #   hostname: "__HOST_HOSTNAME__"
-
   node_exporter:
     image: quay.io/prometheus/node-exporter:latest
     container_name: node_exporter
@@ -42,17 +26,6 @@ services:
     restart: unless-stopped
     volumes:
       - '/:/host:ro,rslave'
-
-  # node-exporter:
-  #   image: jjziets/my-node-exporter:latest
-  #   container_name: node-exporter
-  #   restart: unless-stopped
-  #   network_mode: host
-  #   pid: host
-  #   hostname: "__HOST_HOSTNAME__"
-  #   volumes:
-  #     - "/:/host:ro,rslave"
-  #   command: ["--path.rootfs=/host"]
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.47.1
@@ -69,21 +42,3 @@ services:
     privileged: true
     devices:
       - "/dev/kmsg:/dev/kmsg"
-
-
-  gddr6-metrics-exporter:
-    image: jjziets/gddr6-metrics-exporter:latest
-    privileged: true
-    restart: unless-stopped
-    volumes:
-      - "/var/log/syslog:/var/log/syslog:to"
-      - "/var/log/package-count.txt:/var/log/package-count.txt:ro"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    ports:
-      - "9500:9500"
