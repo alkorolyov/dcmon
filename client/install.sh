@@ -10,5 +10,5 @@ apt install docker.io -y
 sudo apt-get install docker-compose-plugin
 docker compose up -d # this will start all server
 
-export HOSTNAME-$(hostname)
+export HOSTNAME=$(hostname)
 docker compose up -d
