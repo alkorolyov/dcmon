@@ -1,25 +1,23 @@
-version: '3'
 services:
   prometheus:
     image: prom/prometheus
+    container_name: prometheus
     ports:
       - "9090:9090"
     command:
       - '--storage.tsdb.retention.time=30d'
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./cpu_power_usage_rules.yml:/etc/prometheus/cpu_power_usage_rules.yml
-      - prometheus-data:/prometheus
-    restart: always
-  
+      - ./prometheus.yml:/prometheus/prometheus.yml
+      - prom_data:/prometheus
+    restart: unless-stopped
+
   vastai-exporter:
     image: alkorolyov/vastai-exporter
     ports:
       - "8622:8622"
-    command: 
-      - "--api-key=vastkey" #Remember to replace this with your vast API Key
-    restart: always
-   
+    command:
+      - "--api-key=..." #Remember to replace this with your vast API Key
+    restart: unless-stopped
+
 volumes:
-  grafana-data:
-  prometheus-data:
+  prom_data:
