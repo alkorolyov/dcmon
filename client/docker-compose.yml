@@ -7,6 +7,7 @@ services:
     container_name: dcgm-exporter
     ports:
       - "9400:9400"
+    hostname: "__HOST_HOSTNAME__"
     deploy:
       resources:
         reservations:
@@ -28,16 +29,28 @@ services:
   #     - NVIDIA_VISIBLE_DEVICES=all
   #   hostname: "__HOST_HOSTNAME__"
 
-  node-exporter:
-    image: jjziets/my-node-exporter:latest
-    container_name: node-exporter
-    restart: unless-stopped
+  node_exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: node_exporter
+    command:
+      - '--path.rootfs=/host'
     network_mode: host
     pid: host
-    hostname: "__HOST_HOSTNAME__"
+    hostname: "__HOST_HOSTNAME__"    
+    restart: unless-stopped
     volumes:
-      - "/:/host:ro,rslave"
-    command: ["--path.rootfs=/host"]
+      - '/:/host:ro,rslave'
+
+  # node-exporter:
+  #   image: jjziets/my-node-exporter:latest
+  #   container_name: node-exporter
+  #   restart: unless-stopped
+  #   network_mode: host
+  #   pid: host
+  #   hostname: "__HOST_HOSTNAME__"
+  #   volumes:
+  #     - "/:/host:ro,rslave"
+  #   command: ["--path.rootfs=/host"]
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.47.1
