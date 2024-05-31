@@ -13,7 +13,7 @@ services:
     restart: always
   
   vastai-exporter:
-    image: jjziets/vastai-exporter
+    image: alkorolyov/vastai-exporter
     ports:
       - "8622:8622"
     command: 
