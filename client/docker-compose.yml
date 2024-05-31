@@ -42,3 +42,20 @@ services:
     privileged: true
     devices:
       - "/dev/kmsg:/dev/kmsg"
+
+  gddr6-metrics-exporter:
+    image: jjziets/gddr6-metrics-exporter:latest
+    privileged: true
+    restart: unless-stopped
+    volumes:
+      - "/var/log/syslog:/var/log/syslog:to"
+      - "/var/log/package-count.txt:/var/log/package-count.txt:ro"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ports:
+      - "9500:9500"      
