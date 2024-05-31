@@ -7,8 +7,9 @@ apt-get update -y
 apt  install docker.io -y
 
 # install docker-compose
-apt remove docker-compose
-curl -L "https://github.com/docker/compose/releases/download/v2.24.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
-ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
-docker-compose up -d # this will start all server
+sudo apt-get install docker-compose-plugin
+# apt remove docker-compose
+# curl -L "https://github.com/docker/compose/releases/download/v2.24.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+# chmod +x /usr/local/bin/docker-compose
+# ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
+docker compose up # this will start all server
