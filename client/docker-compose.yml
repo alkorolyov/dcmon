@@ -44,7 +44,7 @@ services:
       - "/dev/kmsg:/dev/kmsg"
 
   gddr6-metrics-exporter:
-    image: jjziets/gddr6-metrics-exporter:latest
+    image: alkorolyov/gddr6-metrics-exporter:latest
     privileged: true
     container_name: gddr6-exporter
     restart: unless-stopped
