@@ -19,8 +19,7 @@ services:
     restart: unless-stopped
     ports:
       - "9200:9200"
-    command:
-    - '--publish=9200:9200'
+    command: ["/usr/bin/cadvisor", "--port=9200"]  # Add this line to set the port
     volumes:
       - "/:/rootfs:ro"
       - "/var/run:/var/run:ro"
