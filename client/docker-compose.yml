@@ -18,7 +18,7 @@ services:
     container_name: cadvisor
     restart: unless-stopped
     ports:
-      - "8080:9200"
+      - "9200:8080"
     command: ["/usr/bin/cadvisor", "--port=9200"]  # Add this line to set the port
     volumes:
       - "/:/rootfs:ro"
