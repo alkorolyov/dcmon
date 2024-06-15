@@ -1,4 +1,37 @@
 services:
+  # PORT 9100
+  node_exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: node-exporter
+    command:
+      - '--path.rootfs=/host'
+    network_mode: host
+    pid: host
+    hostname: ${HOSTNAME}
+    restart: unless-stopped
+    volumes:
+      - '/:/host:ro,rslave'
+  
+  # PORT 9200
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.1
+    container_name: cadvisor
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+    command:
+    - '-port=9200'
+    volumes:
+      - "/:/rootfs:ro"
+      - "/var/run:/var/run:ro"
+      - "/sys:/sys:ro"
+      - "/var/lib/docker/:/var/lib/docker:ro"
+      - "/dev/disk/:/dev/disk:ro"
+    privileged: true
+    devices:
+      - "/dev/kmsg:/dev/kmsg"
+
+  # PORT 9400
   dcgm-exporter:
     image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.6-3.4.2-ubuntu22.04
     container_name: dcgm-exporter
@@ -15,34 +48,7 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
-  node_exporter:
-    image: quay.io/prometheus/node-exporter:latest
-    container_name: node-exporter
-    command:
-      - '--path.rootfs=/host'
-    network_mode: host
-    pid: host
-    hostname: ${HOSTNAME}
-    restart: unless-stopped
-    volumes:
-      - '/:/host:ro,rslave'
-
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.47.1
-    container_name: cadvisor
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    volumes:
-      - "/:/rootfs:ro"
-      - "/var/run:/var/run:ro"
-      - "/sys:/sys:ro"
-      - "/var/lib/docker/:/var/lib/docker:ro"
-      - "/dev/disk/:/dev/disk:ro"
-    privileged: true
-    devices:
-      - "/dev/kmsg:/dev/kmsg"
-
+  # PORT 9500
   gddr6-metrics-exporter:
     image: alkorolyov/gddr6-metrics-exporter:latest
     privileged: true
