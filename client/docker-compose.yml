@@ -20,7 +20,7 @@ services:
     ports:
       - "9200:9200"
     command:
-    - '-port=9200'
+    - '--publish=9200:9200'
     volumes:
       - "/:/rootfs:ro"
       - "/var/run:/var/run:ro"
