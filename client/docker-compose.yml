@@ -39,6 +39,8 @@ services:
     cap_add:
       - SYS_ADMIN      
     hostname: ${HOSTNAME}
+    environment:
+      - NODE_NAME=${HOSTNAME}
     deploy:
       resources:
         reservations:
