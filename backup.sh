@@ -25,7 +25,7 @@ echo -e "\nSending the tar file to server..."
 
 # cat $vast_dir/host_port_range |  ssh user@host -p port "cat > /mnt/backup/vast/$folder_name/host_port_range"
 # cat $vast_dir/host_port_range |  ssh user@host -p port "cat > /mnt/backup/vast/$folder_name/host_port_range"
-# tar -cf - /var/lib/docker | pv | pzstd - | ssh user@host -p port 'cat > /mnt/backup/vast/$folder_name/docker.tar.zst'
+# tar -cf - /var/lib/docker | pv | pzstd - | ssh user@host -p port "cat > /mnt/backup/vast/$folder_name/docker.tar.zst"
  
 cp $vast_dir/host_port_range /mnt/backup/vast/$folder_name
 cp $vast_dir/machine_id /mnt/backup/vast/$folder_name
