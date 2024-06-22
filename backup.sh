@@ -22,8 +22,8 @@ systemctl stop docker
 
 # Check and create folder if it does not exist
 echo -e "\nEnsuring the backup folder exists on remote server..."
-mkdir -p /mnt/backup/vast/$folder_name
-# ssh user@host -p port "mkdir -p /mnt/backup/vast/$folder_name"
+# mkdir -p /mnt/backup/vast/$folder_name
+ssh user@host -p port "mkdir -p /mnt/backup/vast/$folder_name"
 
 # Tar the folder /var/lib/docker and send it to the server
 echo -e "\nSending the tar file to server..."
