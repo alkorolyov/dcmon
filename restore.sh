@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Get user input for SSH connection details
+read -p "Enter SSH username: " user
+read -p "Enter SSH hostname or IP address: " host
+read -p "Enter SSH port: " port
+
 # Get folder names
 folder_name=$(hostname)
 vast_dir="/var/lib/vastai_kaalia"
