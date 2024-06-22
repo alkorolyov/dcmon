@@ -28,7 +28,7 @@ ssh user@host -p port "mkdir -p /mnt/backup/vast/$folder_name"
 # Tar the folder /var/lib/docker and send it to the server
 echo -e "\nSending the tar file to server..."
 
-cat $vast_dir/host_port_range |  ssh $user@$host -p $port "cat > /mnt/backup/vast/$folder_name/host_port_range"
+cat $vast_dir/machine_id |  ssh $user@$host -p $port "cat > /mnt/backup/vast/$folder_name/machine_id"
 cat $vast_dir/host_port_range |  ssh $user@$host -p $port "cat > /mnt/backup/vast/$folder_name/host_port_range"
 tar -cf - /var/lib/docker | pv | pzstd - | ssh $user@$host -p $port "cat > /mnt/backup/vast/$folder_name/docker.tar.zst"
  
