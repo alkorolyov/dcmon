@@ -21,7 +21,7 @@ Replace this with your Vast API key
 run install.sh as root
 
 ### Server
-* prometheus db and stores data from clients
+* runs prometheus and stores data from clients
 * runs prom-vastai service to get info about your machines from VAST
 
 https://github.com/alkorolyov/prometheus-vastai
