@@ -13,8 +13,7 @@ services:
 
   vastai-exporter:
     image: alkorolyov/vastai-exporter
-    ports:
-      - "8622:8622"
+    container_name: vastai_exporter
     command:
       - "--api-key=..." #Remember to replace this with your vast API Key
     restart: unless-stopped
