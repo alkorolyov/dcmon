@@ -45,6 +45,8 @@ User=$USER
 Group=$GROUP
 Type=simple
 ExecStart=$VAR_DIR/node_exporter --collector.textfile.directory $VAR_DIR/exporters --collector.disable-defaults --collector.cpu --collector.diskstats --collector.filesystem --collector.netdev --collector.meminfo --collector.mdadm --collector.textfile
+Restart=always
+RestartSec=15s
 
 [Install]
 WantedBy=multi-user.target
@@ -62,6 +64,8 @@ User=$USER
 Group=$GROUP
 Type=simple
 ExecStart=/bin/bash $VAR_DIR/run_exporters.sh
+Restart=always
+RestartSec=15s
 
 [Install]
 WantedBy=multi-user.target
