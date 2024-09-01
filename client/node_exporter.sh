@@ -2,7 +2,6 @@
 ###### node_exporter service ########
 
 VAR_DIR='/var/lib/node_exporter'
-SLEEP_TIME=15
 
 # Define ANSI escape codes for colors
 RED='\033[0;31m'
