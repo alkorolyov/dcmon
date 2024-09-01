@@ -50,7 +50,7 @@ After=network-online.target
 User=$USER
 Group=$GROUP
 Type=simple
-ExecStart=$BIN_DIR/node_exporter --collector.textfile.directory $VAR_DIR/proms --collector.disable-defaults --collector.cpu --collector.diskstats --collector.filesystem --collector.netdev --collector.meminfo --collector.mdadm --collector.textfile
+ExecStart=node_exporter --collector.textfile.directory $VAR_DIR/proms --collector.disable-defaults --collector.cpu --collector.diskstats --collector.filesystem --collector.netdev --collector.meminfo --collector.mdadm --collector.textfile
 
 [Install]
 WantedBy=multi-user.target
@@ -72,6 +72,7 @@ ExecStart=/bin/bash -c 'while true; do
         {
             output_file=\"$VAR_DIR/proms/\$(basename \${script%.*}).prom\"; 
             sudo bash \$script > \$output_file.tmp 2>/dev/null && mv \$output_file.tmp \$output_file;
+            rm \$output_file.tmp'
         } &
     done
     wait
