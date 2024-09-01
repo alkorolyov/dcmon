@@ -60,8 +60,6 @@ Description=Run custom exporters loop
 After=network-online.target
 
 [Service]
-User=$USER
-Group=$GROUP
 Type=simple
 ExecStart=/bin/bash $VAR_DIR/run_exporters.sh
 Restart=on-failure
