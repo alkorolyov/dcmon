@@ -1,7 +1,6 @@
 #!/bin/bash
 ###### node_exporter service ########
 
-BIN_DIR='/usr/local/bin'
 VAR_DIR='/var/lib/node_exporter'
 SLEEP_TIME=15
 
