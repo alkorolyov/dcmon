@@ -29,7 +29,7 @@ echo "=> Create user/group"
 sudo useradd -rs /bin/false $USER
 sudo mkdir -p $VAR_DIR
 sudo cp -R exporters $VAR_DIR/exporters
-#sudo cp run_exporters.sh $VAR_DIR
+sudo cp run_exporters.sh $VAR_DIR
 sudo cp node_exporter*/node_exporter $VAR_DIR
 sudo chown -R $USER:$GROUP $VAR_DIR
 
@@ -62,17 +62,7 @@ After=network-online.target
 User=$USER
 Group=$GROUP
 Type=simple
-ExecStart=/bin/bash -c 'while true; do 
-    for script in $VAR_DIR/exporters/*.sh; do 
-        {
-            prom_file=\"$VAR_DIR/exporters/\$(basename \${script%.*}).prom\"; 
-            sudo bash \$script > \$prom_file.tmp 2>/dev/null && mv \$prom_file.tmp \$prom_file;
-            rm \$prom_file.tmp'
-        } &
-    done
-    wait
-    sleep $SLEEP_TIME; 
-done'
+ExecStart=/bin/bash $VAR_DIR/run_exporters.sh
 
 [Install]
 WantedBy=multi-user.target
