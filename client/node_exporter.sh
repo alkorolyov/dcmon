@@ -30,7 +30,7 @@ echo "=> Create user/group"
 sudo useradd -rs /bin/false $USER
 sudo mkdir -p $VAR_DIR
 sudo cp -R exporters $VAR_DIR/exporters
-sudo cp run_exporters.sh $VAR_DIR
+#sudo cp run_exporters.sh $VAR_DIR
 sudo cp node_exporter*/node_exporter $VAR_DIR
 sudo chown -R $USER:$GROUP $VAR_DIR
 
@@ -64,11 +64,11 @@ User=$USER
 Group=$GROUP
 Type=simple
 ExecStart=/bin/bash -c 'while true; do 
-    for script in $VAR_DIR/proms/*.sh; do 
+    for script in $VAR_DIR/exporters/*.sh; do 
         {
-            output_file=\"$VAR_DIR/proms/\$(basename \${script%.*}).prom\"; 
-            sudo bash \$script > \$output_file.tmp 2>/dev/null && mv \$output_file.tmp \$output_file;
-            rm \$output_file.tmp'
+            prom_file=\"$VAR_DIR/exporters/\$(basename \${script%.*}).prom\"; 
+            sudo bash \$script > \$prom_file.tmp 2>/dev/null && mv \$prom_file.tmp \$prom_file;
+            rm \$prom_file.tmp'
         } &
     done
     wait
