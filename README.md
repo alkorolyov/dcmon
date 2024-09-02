@@ -11,6 +11,11 @@ edit /etc/docker/daemon.json:
 
 run install.sh as root
 
+check node_exporter
+```
+curl -s localhost:9100/metrics
+```
+
 ### Install server part
 
 Replace this with your Vast API key 
@@ -19,6 +24,12 @@ Replace this with your Vast API key
 ```
 
 run install.sh as root
+
+
+check prometheus metrics
+```
+curl -s localhost:9090/api/v1/label/__name__/values | jq
+```
 
 ### Server
 * runs prometheus container and stores data from clients
