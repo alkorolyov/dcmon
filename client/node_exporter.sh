@@ -9,8 +9,8 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
 
-USER='node_exporter'
-GROUP=$USER
+#USER='node_exporter'
+#GROUP=$USER
 
 echo -e "=> ${GREEN}Start installation of NODE_EXPORTER service${NC}"
 
@@ -25,12 +25,12 @@ wget -q --show-progress $latest_node_extractor
 tar vxf node_exporter*.tar.gz
 
 echo "=> Create user/group"
-sudo useradd -rs /bin/false $USER
+#sudo useradd -rs /bin/false $USER
 sudo mkdir -p $VAR_DIR
 sudo cp -R exporters $VAR_DIR/exporters
 sudo cp run_exporters.sh $VAR_DIR
 sudo cp node_exporter*/node_exporter $VAR_DIR
-sudo chown -R $USER:$GROUP $VAR_DIR
+#sudo chown -R $USER:$GROUP $VAR_DIR
 
 rm -rf node_exporter*
 
@@ -41,8 +41,8 @@ Description=Node Exporter
 After=network-online.target
 
 [Service]
-User=$USER
-Group=$GROUP
+#User=$USER
+#Group=$GROUP
 Type=simple
 ExecStart=$VAR_DIR/node_exporter --collector.textfile.directory $VAR_DIR/exporters --collector.disable-defaults --collector.cpu --collector.diskstats --collector.filesystem --collector.netdev --collector.meminfo --collector.mdadm --collector.textfile
 Restart=on-failure
@@ -60,8 +60,8 @@ Description=Run custom exporters loop
 After=network-online.target
 
 [Service]
-User=$USER
-Group=$GROUP
+#User=$USER
+#Group=$GROUP
 Type=simple
 ExecStart=/bin/bash $VAR_DIR/run_exporters.sh
 Restart=on-failure
