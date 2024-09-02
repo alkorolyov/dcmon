@@ -26,10 +26,16 @@ Replace this with your Vast API key
 run install.sh as root
 
 
-check prometheus metrics
+check prometheus metrics names
 ```
 curl -s localhost:9090/api/v1/label/__name__/values | jq
 ```
+check single metrics value
+```
+curl -s localhost:9090/api/v1/query?query=scrape_duration_seconds | jq
+```
+
+
 
 ### Server
 * runs prometheus container and stores data from clients
