@@ -8,6 +8,7 @@ services:
       - '--storage.tsdb.retention.time=30d'
     volumes:
       - ./prometheus.yml:/prometheus/prometheus.yml
+      -./rules.yml:/prometheus/rules.yml
       - prom_data:/prometheus
     restart: unless-stopped
 
