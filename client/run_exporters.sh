@@ -1,7 +1,7 @@
 #!/bin/bash
 
 VAR_DIR='/var/lib/node_exporter'
-SLEEP_TIME=15
+SLEEP_TIME=15  # sleep time in seconds
 
 while true; do
     for script in $VAR_DIR/exporters/*.sh; do
