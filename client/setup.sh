@@ -10,7 +10,8 @@ if [[ $UID -ne 0 ]]; then
     exit
 fi
 
-apt-get install nvme-cli jq ipmitool
+echo "=> Install apt dependencies"
+apt-get install -qq nvme-cli jq ipmitool
 
 echo "=> Download and extract latest node_exporter"
 latest_node_extractor=$(curl -s https://api.github.com/repos/prometheus/node_exporter/releases/latest | grep "browser_download_url.*linux-amd64" | cut -d '"' -f 4)
@@ -18,10 +19,10 @@ wget -q --show-progress $latest_node_extractor
 tar vxf node_exporter*.tar.gz
 
 echo "=> Create user/group"
-sudo mkdir -p $VAR_DIR
-sudo cp -R exporters $VAR_DIR/exporters
-sudo cp run_exporters.sh $VAR_DIR
-sudo cp node_exporter*/node_exporter $VAR_DIR
+mkdir -p $VAR_DIR
+cp -R exporters $VAR_DIR/exporters
+cp run_exporters.sh $VAR_DIR
+cp node_exporter*/node_exporter $VAR_DIR
 
 rm -rf node_exporter*
 
