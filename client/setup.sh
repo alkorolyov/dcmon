@@ -78,6 +78,6 @@ systemctl enable run_exporters
 
 echo "=> Remove installation files"
 cd /
-rm -rf /tmp/dcmon/*
+rm -rf /tmp/dcmon
 
 echo "=> Installation complete!"
