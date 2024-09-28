@@ -13,5 +13,5 @@ decimal_zone0=$(printf "%d" "0x$clean_hex_zone0")
 decimal_zone1=$(printf "%d" "0x$clean_hex_zone1")
 
 # Output the decimal values
-echo "Zone 0 fan speed: $decimal_zone0"
-echo "Zone 1 fan speed: $decimal_zone1"
+echo "Zone 0 fan speed: $decimal_zone0%"
+echo "Zone 1 fan speed: $decimal_zone1%"

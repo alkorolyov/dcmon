@@ -39,7 +39,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$VAR_DIR/node_exporter --collector.textfile.directory $VAR_DIR/exporters --collector.disable-defaults --collector.cpu --collector.diskstats --collector.filesystem --collector.netdev --collector.meminfo --collector.mdadm --collector.textfile
+ExecStart=$VAR_DIR/node_exporter --collector.textfile.directory $VAR_DIR/proms --collector.disable-defaults --collector.cpu --collector.diskstats --collector.filesystem --collector.netdev --collector.meminfo --collector.mdadm --collector.textfile
 Restart=on-failure
 RestartSec=$TIMEOUT
 
