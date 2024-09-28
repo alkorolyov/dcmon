@@ -2,6 +2,7 @@
 ###### node_exporter service ########
 
 VAR_DIR='/var/lib/node_exporter'
+TIMEOUT=30  # in seconds
 
 echo -e "=> Start installation of NODE_EXPORTER service"
 
@@ -11,20 +12,24 @@ if [[ $UID -ne 0 ]]; then
 fi
 
 echo "=> Install apt dependencies"
-apt-get install -qq nvme-cli jq ipmitool
+apt-get install -qq nvme-cli jq ipmitool git
+
+cd /tmp
+
+echo "=> Clone repo"
+git clone https://github.com/alkorolyov/dcmon
+cd dcmon/client
 
 echo "=> Download and extract latest node_exporter"
 latest_node_extractor=$(curl -s https://api.github.com/repos/prometheus/node_exporter/releases/latest | grep "browser_download_url.*linux-amd64" | cut -d '"' -f 4)
 wget -q --show-progress $latest_node_extractor
 tar vxf node_exporter*.tar.gz
 
-echo "=> Create user/group"
+echo "=> Copy program files"
 mkdir -p $VAR_DIR
 cp -R exporters $VAR_DIR/exporters
 cp run_exporters.sh $VAR_DIR
 cp node_exporter*/node_exporter $VAR_DIR
-
-rm -rf node_exporter*
 
 echo "=> Create service file"
 NODE_EXPORTER_SERVICE="
@@ -36,7 +41,7 @@ After=network-online.target
 Type=simple
 ExecStart=$VAR_DIR/node_exporter --collector.textfile.directory $VAR_DIR/exporters --collector.disable-defaults --collector.cpu --collector.diskstats --collector.filesystem --collector.netdev --collector.meminfo --collector.mdadm --collector.textfile
 Restart=on-failure
-RestartSec=15s
+RestartSec=$TIMEOUT
 
 [Install]
 WantedBy=multi-user.target
@@ -53,9 +58,9 @@ After=network-online.target
 #User=$USER
 #Group=$GROUP
 Type=simple
-ExecStart=/bin/bash $VAR_DIR/run_exporters.sh
+ExecStart=/bin/bash $VAR_DIR/run_exporters.sh $VAR_DIR $TIMEOUT
 Restart=on-failure
-RestartSec=15s
+RestartSec=$TIMEOUT
 
 [Install]
 WantedBy=multi-user.target
@@ -69,5 +74,10 @@ systemctl start run_exporters
 
 systemctl enable node_exporter
 systemctl enable run_exporters
+
+
+echo "=> Remove installation files"
+cd /
+rm -rf /tmp/dcmon/*
 
 echo "=> Installation complete!"

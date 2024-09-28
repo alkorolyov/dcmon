@@ -15,14 +15,15 @@ mkdir -p "$VAR_DIR/proms"
 while true; do
     for script in "$VAR_DIR/exporters/"*.sh; do
         {
-            prom_file="$VAR_DIR/proms/$(basename "${script%.*}").prom"
+            name=$(basename "${script%.*}")
+            prom_file="$VAR_DIR/proms/$name.prom"
             
-            if timeout $((SLEEP_TIME - 5)) bash "$script" > "$prom_file.tmp" 2>> "$VAR_DIR/errors.log"; then
+            if timeout $((SLEEP_TIME - 1)) bash "$script" > "$prom_file.tmp" 2>> "$VAR_DIR/errors.log"; then
                 mv "$prom_file.tmp" "$prom_file"
             elif [ $? -eq 124 ]; then
-                echo "$(date +'%Y-%m-%d %H:%M:%S') - Execution of $script timed out" >> "$VAR_DIR/errors.log"
+                echo "$(date +'%Y-%m-%d %H:%M:%S') - Execution of $name timed out" >> "$VAR_DIR/errors.log"
             else
-                echo "$(date +'%Y-%m-%d %H:%M:%S') - Execution of $script failed" >> "$VAR_DIR/errors.log"
+                echo "$(date +'%Y-%m-%d %H:%M:%S') - Execution of $name failed" >> "$VAR_DIR/errors.log"
             fi
         } &
     done
