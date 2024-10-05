@@ -39,10 +39,10 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# Check if programs are installed
-if ! command -v fail2ban-client >/dev/null 2>&1; then
-  echo "${0##*/}: fail2ban is not installed. Aborting." >&2
-  exit 1
+# Check if fail2ban is running
+if ! systemctl is-active --quiet fail2ban; then
+#  echo "${0##*/}: fail2ban is not running. Aborting." >&2
+  exit 0
 fi
 
 # Get the status of fail2ban and extract the number of jails and list of jails
