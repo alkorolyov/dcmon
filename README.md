@@ -3,6 +3,10 @@ DataCenter monitoring for VastAI
 
 ### Install client part
 
+```
+wget https://raw.githubusercontent.com/alkorolyov/dcmon/refs/heads/main/client/setup.sh; sudo bash setup.sh
+```
+
 edit /etc/docker/daemon.json:
 
 ```
