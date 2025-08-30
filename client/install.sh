@@ -202,18 +202,24 @@ setup_server_url() {
     
     # Update config.json with proper server URL
     if command -v python3 >/dev/null 2>&1; then
-        python3 -c "
+        if python3 -c "
 import json
 with open('$config_file', 'r') as f: config = json.load(f)
 config['server_url'] = '$server_url'
 with open('$config_file', 'w') as f: json.dump(config, f, indent=2)
-" 2>/dev/null || {
-        print_warning "Failed to update config.json automatically"
+" 2>/dev/null; then
+            print_success "Updated server URL to: $server_url"
+        else
+            print_warning "Failed to update config.json automatically"
+            echo "Please manually update server_url in $config_file"
+            return 1
+        fi
+    else
+        print_warning "Python3 not available for config update"
         echo "Please manually update server_url in $config_file"
         return 1
-    }
+    fi
     
-    print_success "Updated server URL to: $server_url"
     return 0
 }
 
