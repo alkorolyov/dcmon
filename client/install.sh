@@ -98,15 +98,6 @@ install_files() {
         fi
     done
     
-    # Copy exporters directory
-    if [[ -d "$current_dir/exporters" ]]; then
-        cp -r "$current_dir/exporters" "/opt/dcmon/"
-        # Make all scripts executable
-        find "/opt/dcmon/exporters" -name "*.sh" -exec chmod +x {} \;
-        print_success "Installed exporter scripts"
-    else
-        print_warning "Exporters directory not found"
-    fi
     
     # Copy requirements.txt if exists
     if [[ -f "$current_dir/requirements.txt" ]]; then
