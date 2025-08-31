@@ -1,126 +1,406 @@
 #!/usr/bin/env python3
 """
-dcmon Server - Clean V2 Implementation with Peewee
-Simplified version focusing on V2 authentication
+dcmon FastAPI server — config-first, path-free, policy-enforced
+
+Policy (no paths in config):
+- PROD (test_mode: false)
+    DB:         /var/lib/dcmon-server/dcmon.db
+    Admin token:/etc/dcmon-server/admin_token  (must exist; else startup fails)
+- DEV  (test_mode: true)
+    DB:         ./dcmon.db
+    Admin token:./admin_token  (if missing, generate ephemeral and log)
+
+Identity: Client.id (peewee default PK)
+Credentials: client_token (client), admin_token (server-side)
+
+This file also runs a periodic cleanup task that removes metrics older than
+`metrics_days` (config) every hour.
 """
 
+import argparse
+import asyncio
+import json
+import time
 import logging
-
-from fastapi import FastAPI
 from contextlib import asynccontextmanager
+from secrets import compare_digest
+from typing import Any, Dict, List, Optional
 
-from models import DatabaseManager, get_db
-from config import Config, load_config
-from routes import create_routes, create_auth_dependency
+import yaml
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Path
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field, model_validator
 
-# Logger will be configured in main()
-logger = logging.getLogger('dcmon-server')
+# Support running as script or as package
+try:
+    from .models import db_manager, Client, MetricSeries, MetricPointsInt, MetricPointsFloat, Command
+    from .auth import AuthService
+except ImportError:
+    from models import db_manager, Client, MetricSeries, MetricPointsInt, MetricPointsFloat, Command
+    from auth import AuthService
 
-# Load admin token from config
-def load_admin_token(config: Config) -> str:
-    """Load admin token from file or use test token"""
-    # Check if we should use test token (empty file path or test mode)
-    if not config.admin_token_file or config.test_mode:
-        logger.warning("Using test admin token (test mode or no file configured)")
-        return "dcmon_admin_test123"
-    
+logger = logging.getLogger("dcmon.server")
+
+
+# ---------------- Config (path-free) ----------------
+
+class ServerConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8000
+    log_level: str = "INFO"
+    metrics_days: int = 7
+    test_mode: bool = False
+
+
+def load_config_from(path: str) -> ServerConfig:
+    with open(path, "r") as f:
+        data = yaml.safe_load(f) or {}
+    return ServerConfig(**data)
+
+
+# ---------------- Path policy helpers ----------------
+
+def _resolve_paths(cfg: ServerConfig):
+    """
+    Return (db_path, admin_token_path, allow_ephemeral_admin_token)
+    based on test_mode.
+    """
+    from pathlib import Path
+    if cfg.test_mode:
+        return (Path.cwd() / "dcmon.db", Path.cwd() / "admin_token", True)
+    else:
+        return (Path("/var/lib/dcmon-server/dcmon.db"),
+                Path("/etc/dcmon-server/admin_token"),
+                False)
+
+
+def _read_admin_token(path) -> Optional[str]:
     try:
-        with open(config.admin_token_file, "r") as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        logger.warning(f"Admin token file not found: {config.admin_token_file}, using test token")
-        return "dcmon_admin_test123"
+        with open(path, "r") as f:
+            tok = f.read().strip()
+            return tok or None
     except Exception as e:
-        logger.error(f"Failed to load admin token: {e}")
-        return "dcmon_admin_test123"
+        logger.debug("admin token file not readable (%s): %s", path, e)
+        return None
 
 
+# ---------------- App factory ----------------
 
+def create_app(config: ServerConfig) -> FastAPI:
+    """
+    Build the FastAPI app using the provided config.
+    """
+    security = HTTPBearer()
+    auth_service = AuthService()
+    ADMIN_TOKEN: Optional[str] = None
+    cleanup_task: Optional[asyncio.Task] = None
+    CLEANUP_INTERVAL_SECONDS = 3600  # hourly
 
-
-def create_lifespan(config: Config):
-    """Create lifespan manager with the given config"""
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        """Manage database lifecycle"""
-        # Startup
-        from models import DatabaseManager
-        
-        db_path = config.database_path
-        global db_manager
-        db_manager = DatabaseManager(db_path)
-        
-        if not db_manager.connect():
-            raise RuntimeError("Failed to initialize database")
-        logger.info(f"dcmon server V2 started with database: {db_path}")
-        
-        yield
-        
-        # Shutdown
-        db_manager = get_db()
-        db_manager.close()
-        logger.info("dcmon server V2 stopped")
-    return lifespan
+        nonlocal ADMIN_TOKEN, cleanup_task
 
-def create_app(config: Config) -> FastAPI:
-    """Create FastAPI app with the given configuration"""
-    global get_admin_auth, ADMIN_TOKEN
-    
-    admin_token = load_admin_token(config)
-    logger.info("Admin token loaded successfully")
-    
-    # Set global variables for routes
-    ADMIN_TOKEN = admin_token
-    get_admin_auth = create_auth_dependency(admin_token)
-    lifespan = create_lifespan(config)
-    
-    # FastAPI app with lifespan and conditional docs
-    app = FastAPI(
-        title="dcmon Server V2",
-        description="Datacenter Monitoring Server",
-        version="2.0.0",
-        lifespan=lifespan,
-        docs_url="/docs" if config.test_mode else None,
-        redoc_url="/redoc" if config.test_mode else None,
-        openapi_url="/openapi.json" if config.test_mode else None
-    )
-    
-    # Include routes
-    router = create_routes(admin_token)
-    app.include_router(router)
+        # Configure logging early
+        logging.getLogger().setLevel(getattr(logging, config.log_level.upper(), logging.INFO))
+
+        # Resolve paths from policy
+        db_path, admin_token_path, allow_ephemeral = _resolve_paths(config)
+        logger.info("resolved paths: db=%s, admin_token=%s, test_mode=%s",
+                    db_path, admin_token_path, config.test_mode)
+
+        # Apply DB path before connecting
+        try:
+            from pathlib import Path
+            db_manager.db_path = Path(db_path)
+        except Exception:
+            pass
+
+        if not db_manager.connect():
+            logger.error("Failed to connect database on startup.")
+            raise RuntimeError("DB connect failed")
+
+        # Admin token resolution
+        token = _read_admin_token(admin_token_path)
+        if token is None and allow_ephemeral:
+            token = auth_service.generate_admin_token()
+            logger.warning("No admin token file found; generated EPHEMERAL admin token (dev): %s", token)
+            logger.warning("To use a fixed token in dev, create ./admin_token with 0600 perms.")
+        if token is None and not allow_ephemeral:
+            db_manager.close()
+            raise RuntimeError(
+                f"Admin token file missing at {admin_token_path}. "
+                f"Create it with a secure token generated by the installer."
+            )
+        ADMIN_TOKEN = token
+
+        # Start periodic cleanup (run in executor so we don't block the event loop)
+        async def _cleanup_loop():
+            loop = asyncio.get_running_loop()
+            while True:
+                try:
+                    # Cleanup both int and float points
+                    deleted_int = await loop.run_in_executor(None, MetricPointsInt.cleanup_old_data, config.metrics_days)
+                    deleted_float = await loop.run_in_executor(None, MetricPointsFloat.cleanup_old_data, config.metrics_days)
+                    deleted_total = deleted_int + deleted_float
+                    logger.debug("periodic cleanup: removed %s int points, %s float points (%s days)", 
+                                deleted_int, deleted_float, config.metrics_days)
+                except Exception as e:
+                    logger.error("periodic cleanup failed: %s", e)
+                await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
+
+        cleanup_task = asyncio.create_task(_cleanup_loop())
+
+        logger.info("dcmon server started (host=%s, port=%d)", config.host, config.port)
+        try:
+            yield
+        finally:
+            # Stop cleanup task
+            if cleanup_task:
+                cleanup_task.cancel()
+                try:
+                    await cleanup_task
+                except asyncio.CancelledError:
+                    pass
+            db_manager.close()
+            logger.info("dcmon server stopped")
+
+    app = FastAPI(title="dcmon server", version="0.1.0", lifespan=lifespan)
+
+    # ------------- Auth dependencies -------------
+
+    def require_admin_auth(creds: HTTPAuthorizationCredentials = Depends(security)) -> None:
+        if not ADMIN_TOKEN or not compare_digest(creds.credentials, ADMIN_TOKEN):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid admin token")
+
+    def require_client_auth(creds: HTTPAuthorizationCredentials = Depends(security)) -> Client:
+        token = creds.credentials
+        client = Client.get_by_token(token)
+        if not client:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid client token")
+        return client
+
+    # ------------- Schemas (pydantic v2) -------------
+
+    class RegistrationRequest(BaseModel):
+        hostname: str
+        public_key: str
+        challenge: str
+        signature: str
+        timestamp: int
+
+    class MetricRecord(BaseModel):
+        timestamp: int
+        metric_name: str = Field(..., min_length=1)
+        value_type: str = Field(..., pattern="^(int|float)$")
+        value: float  # Accept as float, will be cast to int if value_type is "int"
+        labels: Optional[Dict[str, Any]] = None
+
+        @model_validator(mode="after")
+        def _validate_value_type(self) -> "MetricRecord":
+            if self.value_type == "int":
+                # Validate that the value can be converted to int
+                try:
+                    int(self.value)
+                except (ValueError, OverflowError):
+                    raise ValueError(f"value {self.value} cannot be converted to integer")
+            return self
+
+    class MetricsBatchRequest(BaseModel):
+        metrics: List[MetricRecord]
+
+    class CommandResultRequest(BaseModel):
+        command_id: str
+        status: str = Field("completed", pattern="^(completed|failed)$")
+        result: Optional[Dict[str, Any]] = None
+
+    # ------------- Routes -------------
+
+    @app.post("/api/clients/register", status_code=201, dependencies=[Depends(require_admin_auth)])
+    def register_client(request: RegistrationRequest):
+        vr = auth_service.validate_registration_request(request.model_dump())
+        if not vr.get("valid"):
+            raise HTTPException(status_code=422, detail=vr.get("error") or "invalid request")
+
+        client_token = auth_service.generate_client_token()
+        client_id = db_manager.register_client(
+            hostname=vr["hostname"],
+            client_token=client_token,
+            public_key=vr["public_key"],
+        )
+        if client_id is None:
+            raise HTTPException(status_code=500, detail="failed to register client")
+
+        return {"client_id": client_id, "client_token": client_token}
+
+    @app.post("/api/metrics")
+    def submit_metrics(body: MetricsBatchRequest, client: Client = Depends(require_client_auth)):
+        now = int(time.time())
+        int_points = []
+        float_points = []
+        
+        for m in body.metrics:
+            if m.timestamp > now + 300:
+                raise HTTPException(status_code=422, detail=f"metric timestamp too far in future: {m.timestamp}")
+            
+            # Get or create metric series
+            labels_json = json.dumps(m.labels) if m.labels else None
+            series = MetricSeries.get_or_create_series(
+                client_id=client.id,
+                metric_name=m.metric_name, 
+                labels=labels_json,
+                value_type=m.value_type
+            )
+            
+            # Prepare data for appropriate points table
+            if m.value_type == "int":
+                int_points.append({
+                    "series": series.id,
+                    "timestamp": m.timestamp,
+                    "value": int(m.value)
+                })
+            else:  # float
+                float_points.append({
+                    "series": series.id,
+                    "timestamp": m.timestamp,
+                    "value": m.value
+                })
+        
+        # Bulk insert points
+        inserted_total = 0
+        if int_points:
+            inserted_int = MetricPointsInt.insert_many(int_points).on_conflict_ignore().execute()
+            inserted_total += int(inserted_int or 0)
+            
+        if float_points:
+            inserted_float = MetricPointsFloat.insert_many(float_points).on_conflict_ignore().execute()
+            inserted_total += int(inserted_float or 0)
+
+        client.update_last_seen()
+        return {"received": len(body.metrics), "inserted": inserted_total}
+
+    @app.get("/api/commands/{client_id}")
+    def get_client_commands(
+        client_id: int = Path(..., ge=1),
+        client: Client = Depends(require_client_auth),
+    ):
+        if client.id != client_id:
+            raise HTTPException(status_code=403, detail="token does not belong to requested client_id")
+
+        cmds = Command.get_pending_for_client(client_id)
+        out = []
+        for c in cmds:
+            try:
+                data = json.loads(c.command_data)
+            except Exception:
+                data = c.command_data
+            out.append({
+                "id": c.id,
+                "client_id": client_id,
+                "command_type": c.command_type,
+                "command_data": data,
+                "status": c.status,
+                "created_at": c.created_at,
+            })
+        return {"commands": out}
+
+    @app.post("/api/command-results")
+    def submit_command_result(body: CommandResultRequest, client: Client = Depends(require_client_auth)):
+        try:
+            cmd = Command.get_by_id(body.command_id)
+        except Command.DoesNotExist:
+            raise HTTPException(status_code=404, detail="command not found")
+
+        if (isinstance(cmd.client, Client) and cmd.client.id != client.id) or \
+           (not isinstance(cmd.client, Client) and int(cmd.client) != client.id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="command not owned by this client")
+
+        if body.status == "completed":
+            cmd.mark_completed(result=body.result or {})
+        else:
+            err = ""
+            if body.result and "error" in body.result:
+                err = str(body.result["error"])
+            elif body.result is not None:
+                err = json.dumps(body.result)
+            else:
+                err = "unknown error"
+            cmd.mark_failed(error=err)
+
+        return {"ok": True}
+
+    @app.get("/api/clients", dependencies=[Depends(require_admin_auth)])
+    def list_clients():
+        items = []
+        for c in Client.select().order_by(Client.last_seen.desc(nulls="LAST")):
+            items.append(c.to_dict())
+        return {"clients": items}
+
+    @app.get("/api/metrics", dependencies=[Depends(require_admin_auth)])
+    def query_metrics(
+        client_id: Optional[int] = Query(None, ge=1),
+        metric_name: Optional[List[str]] = Query(None),
+        start: Optional[int] = Query(None),
+        end: Optional[int] = Query(None),
+        limit: int = Query(1000, ge=1, le=10000),
+    ):
+        metrics = Metric.get_metrics(
+            client_id=client_id,
+            metric_names=metric_name,
+            start_time=start,
+            end_time=end,
+            limit=limit,
+        )
+        out = []
+        for m in metrics:
+            try:
+                labels = json.loads(m.labels) if m.labels else None
+            except Exception:
+                labels = m.labels
+            out.append({
+                "client_id": int(m.client.id) if isinstance(m.client, Client) else int(m.client),
+                "timestamp": m.timestamp,
+                "metric_name": m.metric_name,
+                "value_float": m.value_float,
+                "value_int": m.value_int,
+                "labels": labels,
+            })
+        return {"metrics": out}
+
+    @app.get("/api/stats", dependencies=[Depends(require_admin_auth)])
+    def get_stats():
+        return db_manager.get_stats()
+
+    @app.get("/health", dependencies=[Depends(require_admin_auth)])
+    def health():
+        try:
+            Client.select().limit(1).execute()
+            db_ok = True
+        except Exception:
+            db_ok = False
+        return {"status": "ok", "db": "connected" if db_ok else "down"}
+
+    @app.get("/api/client/verify")
+    def verify_client(client: Client = Depends(require_client_auth)):
+        """Verify client authentication and return client info"""
+        return {
+            "status": "authenticated",
+            "client_id": client.id,
+            "hostname": client.hostname,
+            "last_seen": client.last_seen
+        }
+
     return app
 
-def main(config_file: str = "config.yaml"):
-    """Main entry point for the server"""
-    # Set up basic logging first
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Load config
-    config = load_config(config_file)
-    
-    # Update logging level based on config
-    log_level = getattr(logging, config.log_level.upper())
-    logging.getLogger().setLevel(log_level)
-    
-    logger.info(f"Starting dcmon server on {config.host}:{config.port}")
-    logger.info(f"Database: {config.database_path}")
-    logger.info(f"Test mode: {config.test_mode}")
-    
-    # Create and run the app
-    app = create_app(config)
-    
-    import uvicorn
-    uvicorn.run(app, host=config.host, port=config.port)
+
+# ---------------- Entrypoint ----------------
 
 if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="dcmon Server")
-    parser.add_argument("-c", "--config", default="config.yaml", help="Configuration file path")
+    parser = argparse.ArgumentParser(description="dcmon server")
+    parser.add_argument("-c", "--config", help="Path to YAML config", default="config.yaml")
     args = parser.parse_args()
-    
-    main(args.config)
 
+    config = load_config_from(args.config)
+    app = create_app(config)
+
+    import uvicorn
+    uvicorn.run(app, host=config.host, port=config.port, reload=False)

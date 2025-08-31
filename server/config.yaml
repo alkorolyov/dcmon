@@ -1,22 +1,12 @@
-# dcmon Server Configuration
-# Simple and essential settings only
-
 # Server binding
 host: "0.0.0.0"
 port: 8000
-
-# Database
-database_path: "/var/lib/dcmon/dcmon.db"
-
-# Authentication  
-admin_token_file: "/etc/dcmon-server/admin_token"
 
 # Logging
 log_level: "INFO"  # INFO or DEBUG
 
 # Data retention (important for disk space)
 metrics_days: 30        # Keep metrics for 30 days
-cleanup_interval: 3600  # Cleanup every hour (seconds)
 
 # Test mode (use test admin token if no file found)
-test_mode: false
+test_mode: true

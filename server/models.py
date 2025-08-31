@@ -1,297 +1,312 @@
 #!/usr/bin/env python3
 """
-dcmon Database Models - Clean Peewee Implementation
+dcmon Database Models — Peewee with default primary keys
+
+Paradigm: Client ↔ Server
+- Canonical identity: Client.id (Peewee's default INTEGER PRIMARY KEY AUTOINCREMENT)
+- Credential: client_token (TEXT UNIQUE)
+- Crypto: public_key (PEM stored for verification)
+- Metrics: either value_float or value_int set (XOR enforced)
+
+Notes:
+- We use ForeignKeyField for relations; SQLite FK enforcement is turned ON at connect().
+- Idempotent metric inserts are ensured by a UNIQUE index on (client, timestamp, metric_name).
 """
 
 import time
 import logging
-from typing import List, Optional, Dict, Any
 from pathlib import Path
+from typing import List, Optional, Dict, Any
 
-from peewee import *
+from peewee import (
+    Model, SqliteDatabase, CharField, IntegerField, FloatField, TextField,
+    ForeignKeyField, Check
+)
 
-logger = logging.getLogger('dcmon-models')
+logger = logging.getLogger("dcmon.models")
 
-# Database instance
+# Global DB handle (initialized in DatabaseManager.connect)
 database = SqliteDatabase(None)
 
 
 class BaseModel(Model):
-    """Base model with database config"""
     class Meta:
         database = database
+        legacy_table_names = False
 
 
 class Client(BaseModel):
-    """Client registration and authentication"""
-    machine_id = CharField(primary_key=True)
+    """Client registration & authentication (id added implicitly by Peewee)."""
     client_token = CharField(unique=True)
     hostname = CharField(null=True)
     last_seen = IntegerField(null=True)
-    status = CharField(default='active')
-    public_key = TextField(null=True)  # RSA public key
+    status = CharField(default="active")
+    public_key = TextField(null=True)   # PEM (server verifies signatures with this)
     created_at = IntegerField()
-    
+
+    class Meta:
+        indexes = (
+            (("last_seen",), False),  # helpful for dashboards
+        )
+
     @classmethod
-    def get_by_client_token(cls, client_token: str) -> Optional['Client']:
-        """Get client by client token"""
+    def get_by_token(cls, token: str) -> Optional["Client"]:
         try:
-            return cls.get(cls.client_token == client_token)
+            return cls.get(cls.client_token == token)
         except cls.DoesNotExist:
             return None
-    
-    @classmethod
-    def get_active_clients(cls) -> List['Client']:
-        """Get all active clients ordered by last seen"""
-        return list(cls.select().where(cls.status == 'active').order_by(cls.last_seen.desc()))
-    
-    def update_last_seen(self, timestamp: Optional[int] = None):
-        """Update last seen timestamp"""
-        self.last_seen = timestamp or int(time.time())
+
+    def update_last_seen(self, ts: Optional[int] = None) -> None:
+        self.last_seen = ts or int(time.time())
         self.save()
-    
+
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary"""
         return {
-            'machine_id': self.machine_id,
-            'hostname': self.hostname,
-            'last_seen': self.last_seen,
-            'status': self.status,
-            'created_at': self.created_at
+            "client_id": self.id,
+            "hostname": self.hostname,
+            "last_seen": self.last_seen,
+            "status": self.status,
+            "created_at": self.created_at,
         }
 
 
-class Metric(BaseModel):
-    """Time-series metric storage"""
-    machine_id = CharField()
-    timestamp = IntegerField()
+class MetricSeries(BaseModel):
+    """
+    Metric series definitions.
+    
+    Each unique combination of (client, metric_name, labels) gets one series record.
+    This normalizes the schema to avoid duplicating metric definitions.
+    """
+    client = ForeignKeyField(Client, backref="metric_series", on_delete="CASCADE", index=True)
     metric_name = CharField()
-    value = FloatField(null=True)
-    value_int = IntegerField(null=True)  # For counters/bytes optimization
-    labels = TextField(null=True)  # JSON string
-    
+    labels_hash = CharField()  # Hash of labels for uniqueness
+    labels = TextField(null=True)  # JSON for display/filtering
+    value_type = CharField()  # "int" or "float"
+    created_at = IntegerField()
+
     class Meta:
-        primary_key = CompositeKey('machine_id', 'timestamp', 'metric_name')
         indexes = (
-            (('machine_id', 'timestamp'), False),
-            (('metric_name', 'timestamp'), False),
+            (("client", "metric_name"), False),
+            (("client", "metric_name", "labels_hash"), True),  # UNIQUE series definition
         )
-    
+
     @classmethod
-    def cleanup_old_data(cls, days_to_keep: int = 7):
-        """Remove old metrics data"""
-        cutoff_time = int(time.time()) - (days_to_keep * 24 * 3600)
-        deleted = cls.delete().where(cls.timestamp < cutoff_time).execute()
-        logger.info(f"Cleaned up {deleted} old metric records")
+    def get_or_create_series(
+        cls, 
+        client_id: int, 
+        metric_name: str, 
+        labels: Optional[str], 
+        value_type: str
+    ) -> "MetricSeries":
+        """Get existing series or create new one."""
+        import hashlib
+        import json
+        
+        # Create consistent hash of labels
+        if labels:
+            labels_dict = json.loads(labels) if isinstance(labels, str) else labels
+            labels_str = json.dumps(labels_dict, sort_keys=True, separators=(',', ':'))
+        else:
+            labels_str = ""
+        labels_hash = hashlib.md5(labels_str.encode()).hexdigest()[:16]
+        
+        try:
+            return cls.get(
+                (cls.client == client_id) & 
+                (cls.metric_name == metric_name) & 
+                (cls.labels_hash == labels_hash)
+            )
+        except cls.DoesNotExist:
+            return cls.create(
+                client=client_id,
+                metric_name=metric_name,
+                labels_hash=labels_hash,
+                labels=labels_str if labels_str else None,
+                value_type=value_type,
+                created_at=int(time.time())
+            )
+
+
+class MetricPointsInt(BaseModel):
+    """Integer metric points (about 70% of data)."""
+    series = ForeignKeyField(MetricSeries, backref="int_points", on_delete="CASCADE", index=True)
+    timestamp = IntegerField()
+    value = IntegerField()
+
+    class Meta:
+        primary_key = False  # Use composite primary key
+        constraints = [
+            # Composite primary key for uniqueness and performance
+        ]
+        indexes = (
+            (("series", "timestamp"), True),  # PRIMARY KEY equivalent
+            (("timestamp",), False),  # For time-range queries
+        )
+
+    @classmethod
+    def cleanup_old_data(cls, days_to_keep: int = 7) -> int:
+        cutoff = int(time.time()) - days_to_keep * 24 * 3600
+        deleted = cls.delete().where(cls.timestamp < cutoff).execute()
+        logger.info(f"int metrics cleanup: removed {deleted} rows (< {days_to_keep}d)")
         return deleted
-    
+
+
+class MetricPointsFloat(BaseModel):
+    """Float metric points (about 30% of data)."""
+    series = ForeignKeyField(MetricSeries, backref="float_points", on_delete="CASCADE", index=True)
+    timestamp = IntegerField()
+    value = FloatField()
+
+    class Meta:
+        primary_key = False  # Use composite primary key
+        constraints = [
+            # Composite primary key for uniqueness and performance
+        ]
+        indexes = (
+            (("series", "timestamp"), True),  # PRIMARY KEY equivalent  
+            (("timestamp",), False),  # For time-range queries
+        )
+
     @classmethod
-    def get_metrics(cls, machine_id: Optional[str] = None, 
-                   metric_names: Optional[List[str]] = None,
-                   start_time: Optional[int] = None,
-                   end_time: Optional[int] = None,
-                   limit: int = 1000) -> List['Metric']:
-        """Query metrics with filters"""
-        query = cls.select()
-        
-        if machine_id:
-            query = query.where(cls.machine_id == machine_id)
-        
-        if metric_names:
-            query = query.where(cls.metric_name.in_(metric_names))
-        
-        if start_time:
-            query = query.where(cls.timestamp >= start_time)
-        
-        if end_time:
-            query = query.where(cls.timestamp <= end_time)
-        
-        query = query.order_by(cls.timestamp.desc()).limit(limit)
-        
-        return list(query)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary"""
-        return {
-            'machine_id': self.machine_id,
-            'timestamp': self.timestamp,
-            'metric_name': self.metric_name,
-            'value': self.value,
-            'value_int': self.value_int,
-            'labels': self.labels
-        }
+    def cleanup_old_data(cls, days_to_keep: int = 7) -> int:
+        cutoff = int(time.time()) - days_to_keep * 24 * 3600
+        deleted = cls.delete().where(cls.timestamp < cutoff).execute()
+        logger.info(f"float metrics cleanup: removed {deleted} rows (< {days_to_keep}d)")
+        return deleted
 
 
 class Command(BaseModel):
-    """Client command queue"""
-    id = CharField(primary_key=True)
-    machine_id = CharField()
+    """Server→Client command queue."""
+    client = ForeignKeyField(Client, backref="commands", on_delete="CASCADE", index=True)
     command_type = CharField()
     command_data = TextField()  # JSON
-    status = CharField(default='pending')
+    status = CharField(default="pending")
     created_at = IntegerField()
     executed_at = IntegerField(null=True)
     result = TextField(null=True)  # JSON
-    
+
+    class Meta:
+        indexes = (
+            (("client", "status"), False),
+        )
+
     @classmethod
-    def get_pending_for_client(cls, machine_id: str) -> List['Command']:
-        """Get pending commands for a specific client"""
-        return list(cls.select().where(
-            (cls.machine_id == machine_id) & 
-            (cls.status == 'pending')
-        ).order_by(cls.created_at))
-    
-    def mark_completed(self, result: Dict[str, Any]):
-        """Mark command as completed with result"""
+    def get_pending_for_client(cls, client_id: int) -> List["Command"]:
+        return list(
+            cls.select()
+              .where((cls.client == client_id) & (cls.status == "pending"))
+              .order_by(cls.created_at)
+        )
+
+    def mark_completed(self, result: Dict[str, Any]) -> None:
         import json
-        self.status = 'completed'
+        self.status = "completed"
         self.executed_at = int(time.time())
         self.result = json.dumps(result)
         self.save()
-    
-    def mark_failed(self, error: str):
-        """Mark command as failed"""
-        self.status = 'failed'
+
+    def mark_failed(self, error: str) -> None:
+        import json
+        self.status = "failed"
         self.executed_at = int(time.time())
-        self.result = json.dumps({'error': error})
+        self.result = json.dumps({"error": error})
         self.save()
 
 
 class DatabaseManager:
-    """Database connection and management"""
-    
-    def __init__(self, db_path: str = "/var/lib/dcmon/dcmon.db"):
+    """DB lifecycle + minimal convenience ops."""
+
+    def __init__(self, db_path: str = "/var/lib/dcmon/dcmon.db") -> None:
         self.db_path = Path(db_path)
         self.connected = False
-    
-    def connect(self):
-        """Initialize database connection"""
+
+    def connect(self) -> bool:
         try:
-            # Ensure database directory exists
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Initialize database
             database.init(str(self.db_path))
-            
-            # Enable WAL mode for better performance
-            database.execute_sql('PRAGMA journal_mode=WAL;')
-            database.execute_sql('PRAGMA synchronous=NORMAL;')
-            database.execute_sql('PRAGMA cache_size=10000;')
-            database.execute_sql('PRAGMA temp_store=MEMORY;')
-            
-            # Create tables
-            database.create_tables([Client, Metric, Command], safe=True)
-            
+            database.connect(reuse_if_open=True)
+
+            # SQLite pragmas for reliability/perf
+            database.execute_sql("PRAGMA foreign_keys=ON;")
+            database.execute_sql("PRAGMA journal_mode=WAL;")
+            database.execute_sql("PRAGMA synchronous=NORMAL;")
+            database.execute_sql("PRAGMA cache_size=10000;")
+            database.execute_sql("PRAGMA temp_store=MEMORY;")
+
+            database.create_tables([Client, MetricSeries, MetricPointsInt, MetricPointsFloat, Command], safe=True)
             self.connected = True
-            logger.info(f"Database initialized: {self.db_path}")
-            
+            logger.info(f"database initialized: {self.db_path}")
             return True
-            
         except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
+            logger.error(f"database init failed: {e}")
             return False
-    
-    def close(self):
-        """Close database connection"""
+
+    def close(self) -> None:
         if self.connected:
             database.close()
             self.connected = False
-            logger.info("Database connection closed")
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Get database statistics"""
-        try:
-            return {
-                'clients_total': Client.select().count(),
-                'clients_active': Client.select().where(Client.status == 'active').count(),
-                'metrics_total': Metric.select().count(),
-                'commands_pending': Command.select().where(Command.status == 'pending').count(),
-                'database_size_mb': round(self.db_path.stat().st_size / 1024 / 1024, 2) if self.db_path.exists() else 0
-            }
-        except Exception as e:
-            logger.error(f"Failed to get database stats: {e}")
-            return {}
+            logger.info("database connection closed")
+
+    # ---- convenience API used by the app ----
 
     @staticmethod
-    def register_client(machine_id: str,
-                        hostname: Optional[str],
-                        client_token: str) -> bool:
+    def register_client(*, hostname: Optional[str], client_token: str, public_key: Optional[str] = None) -> Optional[int]:
         """
-        Register or update a client (by machine_id).
-        Matches the old database.py `register_client` semantics.
+        Minimal registration: always creates a new client row.
+        Returns the new client_id (int) or None on failure.
         """
         try:
-            ts_now = int(time.time())
-            (Client.insert(
-                machine_id=machine_id,
+            now = int(time.time())
+            client = Client.create(
                 client_token=client_token,
                 hostname=hostname,
-                last_seen=ts_now,
-                status='active',
-                created_at=ts_now
-            ).on_conflict(
-                conflict_target=[Client.machine_id],
-                update={
-                    Client.client_token: client_token,
-                    Client.hostname: hostname,
-                    Client.last_seen: ts_now,
-                    Client.status: 'active',
-                    Client.created_at: ts_now,
-                }
-            ).execute())
-            return True
+                last_seen=now,
+                status="active",
+                public_key=public_key,
+                created_at=now,
+            )
+            return int(client.id)
         except Exception as e:
-            logger.error(f"Failed to register client {machine_id}: {e}")
-            return False
+            logger.error(f"register_client failed: {e}")
+            return None
 
-# Global database manager
+    def get_stats(self) -> Dict[str, Any]:
+        try:
+            return {
+                "clients_total": Client.select().count(),
+                "clients_active": Client.select().where(Client.status == "active").count(),
+                "metric_series_total": MetricSeries.select().count(),
+                "metric_points_int": MetricPointsInt.select().count(),
+                "metric_points_float": MetricPointsFloat.select().count(),
+                "commands_pending": Command.select().where(Command.status == "pending").count(),
+                "database_size_mb": round(self.db_path.stat().st_size / 1024 / 1024, 2)
+                if self.db_path.exists() else 0,
+            }
+        except Exception as e:
+            logger.error(f"get_stats failed: {e}")
+            return {}
+
+
+# Global manager accessor
 db_manager = DatabaseManager()
 
 
 def get_db() -> DatabaseManager:
-    """Get database manager instance"""
     return db_manager
 
 
 if __name__ == "__main__":
-    # Test the database models
-    print("Testing dcmon database models...")
-    
-    # Test with temporary database
+    # Smoke test in a temp db
     import tempfile
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-        test_db_path = tmp.name
-    
-    test_manager = DatabaseManager(test_db_path)
-    
-    if test_manager.connect():
-        print("✅ Database connection successful")
-        
-        # Test client creation
-        test_client = Client.create(
-            machine_id='test-123',
-            client_token='test_token_123',
-            hostname='test-host',
-            created_at=int(time.time())
-        )
-        print("✅ Client creation successful")
-        
-        # Test client retrieval
-        found_client = Client.get_by_client_token('test_token_123')
-        if found_client and found_client.machine_id == 'test-123':
-            print("✅ Client retrieval successful")
-        else:
-            print("❌ Client retrieval failed")
-        
-        # Test stats
-        stats = test_manager.get_stats()
-        print(f"✅ Database stats: {stats}")
-        
-        test_manager.close()
-        
-        # Cleanup
-        Path(test_db_path).unlink()
-        
-        print("✅ All database tests passed!")
-    else:
-        print("❌ Database connection failed")
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=True) as tmp:
+        mgr = DatabaseManager(tmp.name)
+        assert mgr.connect()
+        cid = mgr.register_client(hostname="host-a", client_token="tok-123", public_key="PEM...")
+        print("client_id:", cid)
+        # Test new schema
+        series = MetricSeries.get_or_create_series(cid, "cpu_temp_c", None, "float")
+        MetricPointsFloat.create(series=series, timestamp=int(time.time()), value=51.7)
+        pending = Command.get_pending_for_client(cid)
+        print("pending commands:", len(pending))
+        print("stats:", mgr.get_stats())
+        mgr.close()

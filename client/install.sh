@@ -254,6 +254,139 @@ enable_and_start_service() {
     return 0
 }
 
+get_server_url_from_config() {
+    local config_file="/etc/dcmon/config.yaml"
+    if [[ -f "$config_file" ]]; then
+        python3 -c "
+import yaml
+try:
+    with open('$config_file', 'r') as f:
+        config = yaml.safe_load(f)
+    print(config.get('server_url', 'http://localhost:8000'))
+except:
+    print('http://localhost:8000')
+" 2>/dev/null || echo "http://localhost:8000"
+    else
+        echo "http://localhost:8000"
+    fi
+}
+
+validate_registration() {
+    local token_file="/etc/dcmon/client_token"
+    
+    # Check if token file exists
+    if [[ ! -f "$token_file" ]]; then
+        return 1  # No token file
+    fi
+    
+    # Get server URL and token
+    local server_url=$(get_server_url_from_config)
+    local token=$(cat "$token_file" 2>/dev/null || echo "")
+    
+    if [[ -z "$token" ]]; then
+        return 1  # Empty token
+    fi
+    
+    # Test token with server using client verification endpoint
+    if curl -s -f --max-time 10 \
+        -H "Authorization: Bearer $token" \
+        "$server_url/api/client/verify" > /dev/null 2>&1; then
+        return 0  # Valid registration
+    else
+        return 1  # Invalid token or server unreachable
+    fi
+}
+
+check_installation_state() {
+    if [[ ! -f "/etc/systemd/system/dcmon-client.service" ]]; then
+        print_step "📦 Client not installed"
+        return 2  # Full installation needed
+    fi
+    
+    if validate_registration; then
+        print_success "✅ Client already installed and registered"
+        return 0  # Fully operational
+    else
+        print_warning "⚠️ Client installed but registration invalid/missing"
+        return 1  # Registration needed
+    fi
+}
+
+retry_registration() {
+    local server_url=""
+    local admin_token=""
+    
+    echo
+    echo "🔄 Client Registration"
+    echo "====================="
+    
+    # Get server URL (use existing config or prompt)
+    server_url=$(get_server_url_from_config)
+    if [[ "$server_url" == "http://localhost:8000" ]]; then
+        echo
+        read -p "Enter dcmon server URL [$server_url]: " -r input_url
+        if [[ -n "$input_url" ]]; then
+            server_url="$input_url"
+            # Update config with new URL
+            update_config_server_url "$server_url"
+        fi
+    fi
+    
+    # Get admin token
+    echo
+    read -s -p "Enter admin token: " admin_token
+    echo
+    if [[ -z "$admin_token" ]]; then
+        print_error "Admin token is required for client registration"
+        return 1
+    fi
+    
+    print_step "Attempting client registration..."
+    
+    # Attempt registration using the new client.py
+    if echo "$admin_token" | python3 /opt/dcmon/client.py --auth-dir /etc/dcmon --server "$server_url" --once; then
+        print_success "✅ Registration successful!"
+        
+        # Set proper permissions
+        chown dcmon-client:dcmon-client /etc/dcmon/client_token
+        chmod 600 /etc/dcmon/client_token
+        
+        # Start/restart service
+        systemctl daemon-reload
+        systemctl enable dcmon-client
+        systemctl restart dcmon-client
+        
+        print_success "🚀 Client service started successfully"
+        return 0
+    else
+        print_error "❌ Registration failed"
+        echo "Please check:"
+        echo "  • Admin token is correct"
+        echo "  • Server URL is accessible: $server_url"
+        echo "  • Server is running and accepting registrations"
+        return 1
+    fi
+}
+
+update_config_server_url() {
+    local server_url="$1"
+    local config_file="/etc/dcmon/config.yaml"
+    
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "
+import yaml
+try:
+    with open('$config_file', 'r') as f:
+        config = yaml.safe_load(f) or {}
+    config['server_url'] = '$server_url'
+    with open('$config_file', 'w') as f:
+        yaml.dump(config, f, default_flow_style=False)
+except Exception as e:
+    print(f'Warning: Failed to update config: {e}')
+" 2>/dev/null || true
+    fi
+}
+
 main() {
     echo "dcmon Client Installer V2"
     echo "========================="
@@ -262,20 +395,45 @@ main() {
     
     check_root
     
-    print_step "Installing dcmon client..."
-    echo
-    
-    # Installation steps
-    create_directories || exit 1
-    install_dependencies || exit 1
-    install_files || exit 1
-    create_systemd_service || exit 1
-    
-    # Setup configuration and register (prompts for server URL and admin key)
-    setup_server_and_register || exit 1
-    
-    # Enable and start service (auto-registration happens on first start)
-    enable_and_start_service || exit 1
+    # Check current installation state
+    check_installation_state
+    case $? in
+        0) 
+            echo
+            print_success "Nothing to do - client is fully operational"
+            echo
+            echo "Useful commands:"
+            echo "  sudo systemctl status dcmon-client     # Check status"
+            echo "  sudo systemctl restart dcmon-client    # Restart service"  
+            echo "  sudo journalctl -u dcmon-client -f     # Follow logs"
+            exit 0
+            ;;
+        1)
+            echo
+            print_step "Retrying registration only..."
+            retry_registration || {
+                print_error "Registration failed. Run installer again with correct admin token."
+                exit 1
+            }
+            ;;
+        2)
+            echo
+            print_step "Performing full installation..."
+            
+            # Installation steps
+            create_directories || exit 1
+            install_dependencies || exit 1
+            install_files || exit 1
+            create_systemd_service || exit 1
+            
+            # Attempt registration
+            retry_registration || {
+                print_error "Installation completed but registration failed."
+                print_warning "Run installer again to retry registration."
+                exit 1
+            }
+            ;;
+    esac
     
     echo
     echo "========================================"

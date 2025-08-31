@@ -1,11 +1,24 @@
 #!/usr/bin/env python3
 """
-dcmon Client Authentication System
-Handles client key generation, storage, and server authentication
+dcmon Client Authentication
+
+- RSA keypair management (2048-bit)
+- Registration request creation (aligned with server expectations)
+- Client token persistence
+
+Registration request shape (what server expects):
+{
+  "hostname": "<str>",
+  "public_key": "<PEM>",
+  "challenge": "<hostname>:<timestamp>",
+  "signature": "<base64 PSS-SHA256 of challenge>",
+  "timestamp": <unix seconds>
+}
+
+NOTE: Paths are rooted at `auth_dir` (default: /etc/dcmon).
 """
 
 import base64
-import json
 import logging
 import time
 from pathlib import Path
@@ -14,258 +27,208 @@ from typing import Optional, Tuple, Dict, Any
 try:
     from cryptography.hazmat.primitives import serialization, hashes
     from cryptography.hazmat.primitives.asymmetric import rsa, padding
-    from cryptography.hazmat.primitives.serialization import load_pem_private_key, load_pem_public_key
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
     CRYPTO_AVAILABLE = True
 except ImportError:
     CRYPTO_AVAILABLE = False
 
-logger = logging.getLogger('dcmon-client-auth')
+logger = logging.getLogger("dcmon.client.auth")
 
 
 class ClientAuth:
-    """Client authentication handler using RSA key pairs"""
-    
-    def __init__(self, config_dir: Path = Path("/etc/dcmon")):
-        self.config_dir = Path(config_dir)
-        self.private_key_file = self.config_dir / "client.key"
-        self.public_key_file = self.config_dir / "client.pub"
-        self.token_file = self.config_dir / "client_token"
-        
+    """
+    Client-side authentication helper.
+
+    Files (under `auth_dir`, default /etc/dcmon):
+      - client.key    (PEM, 0600)
+      - client.pub    (PEM, 0644)
+      - client_token  (opaque token from server, 0600)
+    """
+
+    def __init__(self, auth_dir: Path = Path("/etc/dcmon")) -> None:
+        self.auth_dir = Path(auth_dir)
+        self.private_key_file = self.auth_dir / "client.key"
+        self.public_key_file = self.auth_dir / "client.pub"
+        self.token_file = self.auth_dir / "client_token"
+
         if not CRYPTO_AVAILABLE:
-            raise ImportError("cryptography package is required but not installed")
-    
+            raise ImportError("cryptography package is required (pip install cryptography)")
+
+    # ---------- Key management ----------
+
     def generate_key_pair(self) -> bool:
-        """Generate new RSA key pair for client authentication"""
+        """Generate a new RSA keypair and write them to disk with proper permissions."""
         try:
-            logger.info("Generating new RSA key pair...")
-            
-            # Generate private key
-            private_key = rsa.generate_private_key(
-                public_exponent=65537,
-                key_size=2048,
-            )
-            
-            # Get public key
+            self.auth_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+            private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
             public_key = private_key.public_key()
-            
-            # Serialize private key
+
+            # Serialize
             private_pem = private_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
+                encryption_algorithm=serialization.NoEncryption(),
             )
-            
-            # Serialize public key
             public_pem = public_key.public_bytes(
                 encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
             )
-            
-            # Create config directory if it doesn't exist
-            self.config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-            
-            # Write private key with restrictive permissions
+
+            # Write
             self.private_key_file.write_bytes(private_pem)
             self.private_key_file.chmod(0o600)
-            
-            # Write public key
+
             self.public_key_file.write_bytes(public_pem)
             self.public_key_file.chmod(0o644)
-            
-            logger.info("RSA key pair generated successfully")
-            logger.info(f"Private key: {self.private_key_file}")
-            logger.info(f"Public key: {self.public_key_file}")
-            
+
+            logger.info("generated new RSA keypair (%s, %s)", self.private_key_file, self.public_key_file)
             return True
-            
         except Exception as e:
-            logger.error(f"Failed to generate key pair: {e}")
+            logger.error("failed to generate key pair: %s", e)
             return False
-    
+
+    def has_valid_keys(self) -> bool:
+        """Quick check that both key files exist and private key loads."""
+        try:
+            if not (self.private_key_file.exists() and self.public_key_file.exists()):
+                return False
+            _priv, _ = self.load_keys()
+            return _priv is not None
+        except Exception:
+            return False
+
     def load_keys(self) -> Tuple[Optional[Any], Optional[str]]:
-        """Load private key and public key from files"""
+        """Load the private key object and public key PEM string."""
         try:
-            if not self.private_key_file.exists() or not self.public_key_file.exists():
-                return None, None
-            
-            # Load private key
-            private_key_data = self.private_key_file.read_bytes()
-            private_key = load_pem_private_key(private_key_data, password=None)
-            
-            # Load public key as string
-            public_key_str = self.public_key_file.read_text().strip()
-            
-            return private_key, public_key_str
-            
+            priv_bytes = self.private_key_file.read_bytes()
+            private_key = load_pem_private_key(priv_bytes, password=None)
+            public_pem = self.public_key_file.read_text().strip()
+            return private_key, public_pem
         except Exception as e:
-            logger.error(f"Failed to load keys: {e}")
+            logger.error("failed to load keys: %s", e)
             return None, None
-    
-    def get_public_key_string(self) -> Optional[str]:
-        """Get public key as string for server registration"""
+
+    def get_public_key(self) -> Optional[str]:
         try:
-            if not self.public_key_file.exists():
-                return None
             return self.public_key_file.read_text().strip()
-        except Exception as e:
-            logger.error(f"Failed to read public key: {e}")
+        except Exception:
             return None
-    
-    def sign_data(self, data: str) -> Optional[str]:
-        """Sign data with private key for authentication"""
+
+    # ---------- Signatures ----------
+
+    def sign(self, data: str) -> Optional[str]:
+        """Sign arbitrary data with the client's private key; return base64-encoded signature."""
         try:
             private_key, _ = self.load_keys()
             if not private_key:
                 return None
-            
-            # Sign the data
-            signature = private_key.sign(
-                data.encode('utf-8'),
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashes.SHA256()
+            sig = private_key.sign(
+                data.encode("utf-8"),
+                padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+                hashes.SHA256(),
             )
-            
-            # Return base64 encoded signature
-            return base64.b64encode(signature).decode('utf-8')
-            
+            return base64.b64encode(sig).decode("utf-8")
         except Exception as e:
-            logger.error(f"Failed to sign data: {e}")
+            logger.error("failed to sign data: %s", e)
             return None
-    
-    def save_client_token(self, token: str) -> bool:
-        """Save authentication token received from server"""
+
+    # ---------- Registration request ----------
+
+    def create_registration_request(self, hostname: str) -> Optional[Dict[str, Any]]:
+        """
+        Build the registration request for the server.
+
+        Challenge format: "<hostname>:<timestamp>"
+        Only the trailing ':<timestamp>' is strictly validated on the server.
+        """
         try:
+            public_key = self.get_public_key()
+            if not public_key:
+                logger.error("public key not found; generate keys first")
+                return None
+
+            ts = int(time.time())
+            challenge = f"{hostname}:{ts}"
+            signature = self.sign(challenge)
+            if not signature:
+                return None
+
+            return {
+                "hostname": hostname,
+                "public_key": public_key,
+                "challenge": challenge,
+                "signature": signature,
+                "timestamp": ts,
+            }
+        except Exception as e:
+            logger.error("failed to create registration request: %s", e)
+            return None
+
+    # ---------- Client token persistence ----------
+
+    def save_client_token(self, token: str) -> bool:
+        try:
+            self.auth_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
             self.token_file.write_text(token)
             self.token_file.chmod(0o600)
             return True
         except Exception as e:
-            logger.error(f"Failed to save auth token: {e}")
+            logger.error("failed to save client token: %s", e)
             return False
-    
+
     def load_client_token(self) -> Optional[str]:
-        """Load authentication token for API requests"""
         try:
             if self.token_file.exists():
                 return self.token_file.read_text().strip()
             return None
         except Exception as e:
-            logger.error(f"Failed to load auth token: {e}")
+            logger.error("failed to load client token: %s", e)
             return None
-    
-    def has_valid_keys(self) -> bool:
-        """Check if valid key pair exists"""
-        return (self.private_key_file.exists() and 
-                self.public_key_file.exists() and
-                self.load_keys()[0] is not None)
-    
-    def create_registration_payload(self, machine_id: str, hostname: str) -> Optional[Dict[str, Any]]:
-        """Create registration payload with signed challenge"""
-        try:
-            public_key_str = self.get_public_key_string()
-            if not public_key_str:
-                return None
-            
-            # Create challenge data to sign
-            timestamp = int(time.time())
-            challenge_data = f"{machine_id}:{hostname}:{timestamp}"
-            
-            # Sign the challenge
-            signature = self.sign_data(challenge_data)
-            if not signature:
-                return None
-            
-            return {
-                "machine_id": machine_id,
-                "hostname": hostname,
-                "public_key": public_key_str,
-                "challenge": challenge_data,
-                "signature": signature,
-                "timestamp": timestamp,
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to create registration payload: {e}")
-            return None
-    
-    def cleanup_old_auth(self):
-        """Remove old API key files for migration"""
-        old_api_key_file = self.config_dir / "api_key"
-        if old_api_key_file.exists():
-            try:
-                old_api_key_file.unlink()
-                logger.info("Removed old API key file")
-            except Exception as e:
-                logger.warning(f"Failed to remove old API key file: {e}")
 
 
-def setup_client_auth(config_dir: Path = Path("/etc/dcmon"), force_regenerate: bool = False) -> Optional[ClientAuth]:
-    """Set up client authentication system"""
-    try:
-        auth = ClientAuth(config_dir)
-        
-        # Check if keys already exist
-        if auth.has_valid_keys() and not force_regenerate:
-            logger.info("Using existing key pair")
-            return auth
-        
-        # Generate new keys
-        if auth.generate_key_pair():
-            logger.info("Client authentication setup complete")
-            return auth
-        else:
-            logger.error("Failed to set up client authentication")
-            return None
-            
-    except ImportError:
-        logger.error("cryptography package is required for client authentication")
-        logger.error("Install with: pip install cryptography")
+def setup_client_auth(auth_dir: Path = Path("/etc/dcmon"), force_regenerate: bool = False) -> Optional[ClientAuth]:
+    """
+    Ensure keys exist and return a ClientAuth instance.
+
+    - If keys missing or force_regenerate=True, generate new keypair.
+    - Does not contact the server or perform registration.
+    """
+    if not CRYPTO_AVAILABLE:
+        logger.error("cryptography package is required (pip install cryptography)")
         return None
+
+    try:
+        auth = ClientAuth(auth_dir)
+        if not auth.has_valid_keys() or force_regenerate:
+            if not auth.generate_key_pair():
+                return None
+        return auth
     except Exception as e:
-        logger.error(f"Failed to set up client authentication: {e}")
+        logger.error("failed to set up client auth: %s", e)
         return None
 
 
 if __name__ == "__main__":
-    # Test the authentication system
-    import tempfile
-    import shutil
-    
-    # Create temporary directory for testing
-    with tempfile.TemporaryDirectory() as temp_dir:
-        test_config_dir = Path(temp_dir)
-        
-        print("Testing client authentication system...")
-        
-        # Set up auth
-        auth = setup_client_auth(test_config_dir)
-        if auth:
-            print("✓ Key pair generated successfully")
-            
-            # Test registration payload creation
-            payload = auth.create_registration_payload("test-machine", "test-host")
-            if payload:
-                print("✓ Registration payload created successfully")
-                print(f"  Machine ID: {payload['machine_id']}")
-                print(f"  Hostname: {payload['hostname']}")
-                print(f"  Signature length: {len(payload['signature'])}")
-            else:
-                print("✗ Failed to create registration payload")
-                
-            # Test token operations
-            test_token = "test_token_123"
-            if auth.save_client_token(test_token):
-                print("✓ Auth token saved successfully")
-                
-                loaded_token = auth.load_client_token()
-                if loaded_token == test_token:
-                    print("✓ Auth token loaded successfully")
-                else:
-                    print("✗ Auth token mismatch")
-            else:
-                print("✗ Failed to save auth token")
-                
-        else:
-            print("✗ Failed to set up authentication")
+    # Simple CLI helper for local testing
+    import argparse, json as _json, socket
+
+    parser = argparse.ArgumentParser(description="dcmon client auth helper")
+    parser.add_argument("--auth-dir", default="/etc/dcmon", dest="auth_dir",
+                        help="directory for client credentials (private key, public key, client token)")
+    parser.add_argument("--gen-keys", action="store_true", help="generate a new RSA keypair")
+    parser.add_argument("--registration", action="store_true", help="print a registration request JSON")
+    parser.add_argument("--hostname", default=socket.gethostname(), help="hostname to include in challenge")
+    args = parser.parse_args()
+
+    auth = setup_client_auth(Path(args.auth_dir), force_regenerate=args.gen_keys)
+    if not auth:
+        raise SystemExit(1)
+
+    if args.registration:
+        req = auth.create_registration_request(args.hostname)
+        if not req:
+            raise SystemExit(2)
+        print(_json.dumps(req, indent=2))
+    else:
+        print(f"Keys OK in {args.auth_dir}. Use --registration to print a request.")

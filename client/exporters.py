@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -39,6 +40,9 @@ class MetricPoint:
             # Disk metrics (bytes/operations)
             'disk_read_bytes_total', 'disk_write_bytes_total',
             'disk_reads_total', 'disk_writes_total',
+
+            # Filesystem metrics (bytes)
+            'fs_total_bytes', 'fs_free_bytes', 'fs_used_bytes',
 
             # GPU integer metrics
             'gpu_clock_sm', 'gpu_clock_mem', 'gpu_pcie_gen', 'gpu_pcie_width',
@@ -105,6 +109,7 @@ class OSMetricsExporter(MetricsExporter):
         metrics.extend(await self._collect_memory_metrics())
         metrics.extend(await self._collect_disk_metrics())
         metrics.extend(await self._collect_network_metrics())
+        metrics.extend(await self._collect_filesystem_metrics())
         return metrics
 
     # ---------- CPU ----------
@@ -292,6 +297,52 @@ class OSMetricsExporter(MetricsExporter):
         except Exception as e:
             self.logger.error(f"/proc/net/dev read error: {e}")
 
+        return metrics
+
+    # ---------- Filesystem ----------
+
+    async def _collect_filesystem_metrics(self) -> List[MetricPoint]:
+        """
+        Collect filesystem space metrics for specific mountpoints.
+        
+        Emits per-mountpoint:
+          - fs_total_bytes
+          - fs_free_bytes  
+          - fs_used_bytes
+        """
+        metrics: List[MetricPoint] = []
+        
+        # Mountpoints to monitor
+        mountpoints = ["/", "/var/lib/docker"]
+        
+        for mountpoint in mountpoints:
+            try:
+                # Check if mountpoint exists
+                if not os.path.exists(mountpoint):
+                    self.logger.debug(f"Mountpoint {mountpoint} does not exist, skipping")
+                    continue
+                
+                # Get filesystem statistics
+                st = os.statvfs(mountpoint)
+                
+                # Calculate sizes in bytes
+                # f_frsize is the fragment size, f_blocks is total fragments
+                # f_bavail is available fragments for unprivileged users
+                total_bytes = st.f_frsize * st.f_blocks
+                free_bytes = st.f_frsize * st.f_bavail
+                used_bytes = total_bytes - free_bytes
+                
+                labels = {"mountpoint": mountpoint}
+                metrics.extend([
+                    MetricPoint("fs_total_bytes", total_bytes, labels),
+                    MetricPoint("fs_free_bytes", free_bytes, labels),
+                    MetricPoint("fs_used_bytes", used_bytes, labels),
+                ])
+                
+            except Exception as e:
+                self.logger.error(f"Failed to get filesystem stats for {mountpoint}: {e}")
+                continue
+        
         return metrics
 
 

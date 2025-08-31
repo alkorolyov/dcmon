@@ -1,22 +1,12 @@
-# dcmon Server Test Configuration  
-# Simple test settings
-
 # Server binding
 host: "0.0.0.0"
 port: 8000
 
-# Database (temp file for testing)
-database_path: "/tmp/dcmon_test.db"
+# Logging
+log_level: "DEBUG"  # INFO or DEBUG
 
-# Authentication (empty = use test token)
-admin_token_file: ""
+# Data retention (important for disk space)
+metrics_days: 1        # Keep metrics for 30 days
 
-# Logging (verbose for testing)
-log_level: "DEBUG"
-
-# Data retention (shorter for testing)
-metrics_days: 2         # Keep metrics for 2 days
-cleanup_interval: 300   # Cleanup every 5 minutes
-
-# Test mode (use test admin token)
+# Test mode (use test admin token if no file found)
 test_mode: true
