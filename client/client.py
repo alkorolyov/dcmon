@@ -20,6 +20,7 @@ Admin token is only used during initial registration and never stored on client.
 import argparse
 import asyncio
 import getpass
+import hashlib
 import json
 import logging
 import os
@@ -171,61 +172,93 @@ def detect_machine_id() -> str:
     """Read machine ID from /etc/machine-id."""
     return Path("/etc/machine-id").read_text().strip()
 
-def detect_disk() -> tuple[Optional[str], Optional[int]]:
-    """Detect primary disk name and size."""
+def detect_all_drives() -> List[Dict[str, Any]]:
+    """Detect all drives in the system."""
+    drives = []
     try:
-        # Use lsblk to get physical disk info, excluding loops/virtual devices
-        result = os.popen("lsblk -d -n -o NAME,SIZE,MODEL 2>/dev/null | grep -E '^(sd|nvme|hd)' | head -1").read().strip()
-        LOG.debug(f"lsblk command result: '{result}'")
+        # Get all physical drives
+        result = os.popen("lsblk -d -n -o NAME,SIZE,MODEL 2>/dev/null | grep -E '^(sd|nvme|hd)'").read().strip()
+        LOG.debug(f"lsblk all drives result: '{result}'")
         
         if result:
-            parts = result.split()
-            LOG.debug(f"lsblk parts: {parts}")
-            
-            if len(parts) >= 2:
-                size_str = parts[1]  # e.g., "500G", "1.8T"  
-                model = ' '.join(parts[2:]) if len(parts) > 2 else None
-                LOG.debug(f"size_str: '{size_str}', model: '{model}'")
-                
-                # Parse size to GB
-                size_gb = None
-                if size_str.endswith('G'):
-                    size_gb = int(float(size_str[:-1]))
-                elif size_str.endswith('T'):
-                    size_gb = int(float(size_str[:-1]) * 1024)
-                elif size_str.endswith('M'):
-                    size_gb = int(float(size_str[:-1]) / 1024)
-                
-                LOG.debug(f"parsed size_gb: {size_gb}")
-                LOG.debug(f"returning disk_name='{model}', disk_size={size_gb}")
-                return model, size_gb
+            for line in result.split('\n'):
+                if line.strip():
+                    parts = line.strip().split()
+                    if len(parts) >= 2:
+                        device = parts[0]
+                        size_str = parts[1]
+                        model = ' '.join(parts[2:]) if len(parts) > 2 else None
+                        
+                        # Parse size to GB (handle both comma and dot decimal separators)
+                        size_gb = get_size_from_str(size_str)
+
+                        drives.append({
+                            "device": device,
+                            "model": model,
+                            "size_gb": size_gb
+                        })
         
-        LOG.debug("no disk result found, returning None, None")
-        return None, None
+        LOG.debug(f"detected all drives: {drives}")
+        return drives
     except Exception as e:
-        LOG.debug(f"detect_disk exception: {e}")
-        return None, None
+        LOG.debug(f"detect_all_drives exception: {e}")
+        return []
+
+
+def get_size_from_str(size_str: str) -> Any:
+    size_gb = None
+    if size_str.endswith('G'):
+        size_value = size_str[:-1].replace(',', '.')
+        size_gb = int(float(size_value))
+    elif size_str.endswith('T'):
+        size_value = size_str[:-1].replace(',', '.')
+        size_gb = int(float(size_value) * 1024)
+    elif size_str.endswith('M'):
+        size_value = size_str[:-1].replace(',', '.')
+        size_gb = int(float(size_value) / 1024)
+    return size_gb
+
+
+def create_hardware_hash(hardware_data: Dict[str, Any]) -> str:
+    """Create consistent hash from hardware data for change detection."""
+    # Create a consistent representation for hashing
+    hash_data = {
+        "mdb_name": hardware_data.get("mdb_name", ""),
+        "cpu_name": hardware_data.get("cpu_name", ""),
+        "cpu_cores": hardware_data.get("cpu_cores", 0),
+        "ram_gb": hardware_data.get("ram_gb", 0),
+        "gpu_name": hardware_data.get("gpu_name", ""),
+        "gpu_count": hardware_data.get("gpu_count", 0),
+        # Sort drives by device name for consistent ordering
+        "drives": sorted(hardware_data.get("drives", []), key=lambda x: x.get("device", ""))
+    }
+    
+    # Convert to JSON string with sorted keys for consistency
+    hash_string = json.dumps(hash_data, sort_keys=True, separators=(',', ':'))
+    
+    # Create SHA256 hash
+    return hashlib.sha256(hash_string.encode()).hexdigest()
+
 
 def detect_hardware() -> Dict[str, Any]:
     """Detect all hardware information."""
     machine_id = detect_machine_id()
-    mdb_name = detect_motherboard()
     cpu_name, cpu_cores = detect_cpu()
-    ram_gb = detect_memory()
     gpu_name, gpu_count = detect_gpu()
-    disk_name, disk_size = detect_disk()
     
     hardware = {
-        "machine_id": machine_id,
-        "mdb_name": mdb_name,
+        "machine_id": machine_id,  # Required for registration
+        "mdb_name": detect_motherboard(),
         "cpu_name": cpu_name,
+        "cpu_cores": cpu_cores,
         "gpu_name": gpu_name,
         "gpu_count": gpu_count,
-        "ram_gb": ram_gb,
-        "cpu_cores": cpu_cores,
-        "disk_name": disk_name,
-        "disk_size": disk_size,
+        "ram_gb": detect_memory(),
+        "drives": detect_all_drives(),  # New: all drives data
     }
+    
+    # Add hardware hash (exclude machine_id from hash since it's system ID, not hardware)
+    hardware["hw_hash"] = create_hardware_hash(hardware)
     
     LOG.debug(f"detect_hardware result: {hardware}")
     return hardware
@@ -278,12 +311,15 @@ async def collect_metrics(hostname: str) -> List[Dict[str, Any]]:
     return all_metrics
 
 
-def send_metrics(server_base: str, client_token: str, metrics: List[Dict[str, Any]]) -> Dict[str, Any]:
+def send_metrics(server_base: str, client_token: str, metrics: List[Dict[str, Any]], hw_hash: Optional[str] = None) -> Dict[str, Any]:
     if not metrics:
         return {"received": 0, "inserted": 0}
     url = server_base.rstrip("/") + "/api/metrics"
     headers = {"Authorization": f"Bearer {client_token}"}
-    return _post_json(url, {"metrics": metrics}, headers)
+    data = {"metrics": metrics}
+    if hw_hash:
+        data["hw_hash"] = hw_hash
+    return _post_json(url, data, headers)
 
 
 def register_client_interactively(auth: ClientAuth, server_base: str, hostname: str) -> str:
@@ -315,7 +351,6 @@ def register_client_interactively(auth: ClientAuth, server_base: str, hostname: 
     
     # Add hardware info to registration request
     req.update(hardware)
-    LOG.debug(f"registration request with hardware: {req}")
     
     # Add admin token to request (only in memory)  
     req["admin_token"] = admin_token
@@ -375,6 +410,10 @@ async def run_client(auth_dir: Path, server: str, interval: int, once: bool, reg
             raise SystemExit("ERROR: Failed to save client token after registration.")
         LOG.info("Client token saved successfully")
 
+    # Generate hardware hash once for metrics sending
+    current_hardware = detect_hardware()
+    hw_hash = current_hardware.get("hw_hash")
+    
     # Metrics loop
     LOG.info("client starting; posting metrics to %s every %ss", server, interval)
     while True:
@@ -382,7 +421,7 @@ async def run_client(auth_dir: Path, server: str, interval: int, once: bool, reg
             batch = await collect_metrics(socket.gethostname())
             if not batch:
                 LOG.warning("no metrics collected")
-            res = send_metrics(server, token, batch)
+            res = send_metrics(server, token, batch, hw_hash)
             LOG.debug("sent metrics: %s", res)
         except HTTPError as e:
             try:

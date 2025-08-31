@@ -22,6 +22,7 @@ from peewee import (
     Model, SqliteDatabase, CharField, IntegerField, FloatField, TextField,
     ForeignKeyField, Check
 )
+from playhouse.sqlite_ext import JSONField
 
 logger = logging.getLogger("dcmon.models")
 
@@ -46,6 +47,7 @@ class Client(BaseModel):
     
     # System identification
     machine_id = CharField(unique=True)  # /etc/machine-id for duplicate prevention
+    hw_hash = CharField(null=True)       # Hardware fingerprint for change detection
     
     # Hardware inventory fields
     mdb_name = CharField(null=True)      # Motherboard name
@@ -54,8 +56,7 @@ class Client(BaseModel):
     gpu_count = IntegerField(null=True)  # Number of GPUs
     ram_gb = IntegerField(null=True)     # Total RAM in GB
     cpu_cores = IntegerField(null=True)  # Number of CPU cores
-    disk_name = CharField(null=True)     # Primary disk name
-    disk_size = IntegerField(null=True)  # Primary disk size in GB
+    drives = JSONField(null=True)        # JSON array of all drives
 
     class Meta:
         indexes = (
@@ -88,6 +89,7 @@ class Client(BaseModel):
             "status": self.status,
             "created_at": self.created_at,
             "machine_id": self.machine_id,
+            "hw_hash": self.hw_hash,
             # Hardware inventory
             "mdb_name": self.mdb_name,
             "cpu_name": self.cpu_name,
@@ -95,8 +97,7 @@ class Client(BaseModel):
             "gpu_count": self.gpu_count,
             "ram_gb": self.ram_gb,
             "cpu_cores": self.cpu_cores,
-            "disk_name": self.disk_name,
-            "disk_size": self.disk_size,
+            "drives": self.drives,
         }
 
 
@@ -285,6 +286,7 @@ class DatabaseManager:
         hostname: Optional[str], 
         client_token: str, 
         machine_id: str,
+        hw_hash: Optional[str] = None,
         public_key: Optional[str] = None,
         # Hardware inventory fields
         mdb_name: Optional[str] = None,
@@ -293,8 +295,7 @@ class DatabaseManager:
         gpu_count: Optional[int] = None,
         ram_gb: Optional[int] = None,
         cpu_cores: Optional[int] = None,
-        disk_name: Optional[str] = None,
-        disk_size: Optional[int] = None,
+        drives: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[int]:
         """
         Register a new client with hardware inventory.
@@ -306,6 +307,7 @@ class DatabaseManager:
                 client_token=client_token,
                 hostname=hostname,
                 machine_id=machine_id,
+                hw_hash=hw_hash,
                 last_seen=now,
                 status="active",
                 public_key=public_key,
@@ -317,8 +319,7 @@ class DatabaseManager:
                 gpu_count=gpu_count,
                 ram_gb=ram_gb,
                 cpu_cores=cpu_cores,
-                disk_name=disk_name,
-                disk_size=disk_size,
+                drives=drives,
             )
             return int(client.id)
         except Exception as e:

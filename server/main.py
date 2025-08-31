@@ -101,7 +101,13 @@ def create_app(config: ServerConfig) -> FastAPI:
         nonlocal ADMIN_TOKEN, cleanup_task
 
         # Configure logging early
-        logging.getLogger().setLevel(getattr(logging, config.log_level.upper(), logging.INFO))
+        log_level = getattr(logging, config.log_level.upper(), logging.INFO)
+        logging.basicConfig(level=log_level, format='%(levelname)s:%(name)s:%(message)s')
+        logging.getLogger().setLevel(log_level)
+        logger.setLevel(log_level)
+        
+        # Silence noisy third-party loggers
+        logging.getLogger('peewee').setLevel(logging.WARNING)
 
         # Resolve paths from policy
         db_path, admin_token_path, allow_ephemeral = _resolve_paths(config)
@@ -170,12 +176,14 @@ def create_app(config: ServerConfig) -> FastAPI:
 
     def require_admin_auth(creds: HTTPAuthorizationCredentials = Depends(security)) -> None:
         if not ADMIN_TOKEN or not compare_digest(creds.credentials, ADMIN_TOKEN):
+            logger.warning(f"Admin authentication failed from request")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid admin token")
 
     def require_client_auth(creds: HTTPAuthorizationCredentials = Depends(security)) -> Client:
         token = creds.credentials
         client = Client.get_by_token(token)
         if not client:
+            logger.warning(f"Client authentication failed with token: {token[:8]}...")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid client token")
         return client
 
@@ -189,6 +197,7 @@ def create_app(config: ServerConfig) -> FastAPI:
         timestamp: int
         # System identification
         machine_id: str
+        hw_hash: Optional[str] = None
         # Hardware inventory fields (optional)
         mdb_name: Optional[str] = None
         cpu_name: Optional[str] = None
@@ -196,8 +205,7 @@ def create_app(config: ServerConfig) -> FastAPI:
         gpu_count: Optional[int] = None
         ram_gb: Optional[int] = None
         cpu_cores: Optional[int] = None
-        disk_name: Optional[str] = None
-        disk_size: Optional[int] = None
+        drives: Optional[List[Dict[str, Any]]] = None
 
     class MetricRecord(BaseModel):
         timestamp: int
@@ -218,6 +226,7 @@ def create_app(config: ServerConfig) -> FastAPI:
 
     class MetricsBatchRequest(BaseModel):
         metrics: List[MetricRecord]
+        hw_hash: Optional[str] = None
 
     class CommandResultRequest(BaseModel):
         command_id: str
@@ -237,6 +246,7 @@ def create_app(config: ServerConfig) -> FastAPI:
         if existing_client:
             # Update last_seen and return existing client
             existing_client.update_last_seen()
+            logger.info(f"EXISTING CLIENT: {request.hostname} (machine_id: {request.machine_id[:8]}...) - returned existing client_id: {existing_client.id}")
             return {
                 "client_id": existing_client.id, 
                 "client_token": existing_client.client_token,
@@ -248,6 +258,7 @@ def create_app(config: ServerConfig) -> FastAPI:
             hostname=vr["hostname"],
             client_token=client_token,
             machine_id=request.machine_id,
+            hw_hash=request.hw_hash,
             public_key=vr["public_key"],
             # Hardware inventory
             mdb_name=request.mdb_name,
@@ -256,12 +267,13 @@ def create_app(config: ServerConfig) -> FastAPI:
             gpu_count=request.gpu_count,
             ram_gb=request.ram_gb,
             cpu_cores=request.cpu_cores,
-            disk_name=request.disk_name,
-            disk_size=request.disk_size,
+            drives=request.drives,
         )
         if client_id is None:
             raise HTTPException(status_code=500, detail="failed to register client")
 
+        logger.info(f"NEW CLIENT: {request.hostname} (machine_id: {request.machine_id[:8]}...) - client_id: {client_id}")
+        
         return {"client_id": client_id, "client_token": client_token}
 
     @app.post("/api/metrics")
@@ -307,7 +319,16 @@ def create_app(config: ServerConfig) -> FastAPI:
             inserted_float = MetricPointsFloat.insert_many(float_points).on_conflict_ignore().execute()
             inserted_total += int(inserted_float or 0)
 
+        # Hardware change detection
+        if body.hw_hash and body.hw_hash != client.hw_hash:
+            logger.warning(f"Hardware changed on client {client.id} ({client.hostname})")
+            # TODO: Request full hardware details and compare
+            # For now, just update the stored hash
+            client.hw_hash = body.hw_hash
+            client.save()
+        
         client.update_last_seen()
+        logger.debug(f"Metrics from client {client.id} ({client.hostname}): received {len(body.metrics)}, inserted {inserted_total}")
         return {"received": len(body.metrics), "inserted": inserted_total}
 
     @app.get("/api/commands/{client_id}")
@@ -435,4 +456,4 @@ if __name__ == "__main__":
     app = create_app(config)
 
     import uvicorn
-    uvicorn.run(app, host=config.host, port=config.port, reload=False)
+    uvicorn.run(app, host=config.host, port=config.port, reload=False, access_log=False)
