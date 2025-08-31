@@ -96,7 +96,7 @@ create_virtual_environment() {
             print_success "Installed Python dependencies from requirements.txt"
         else
             print_warning "Failed to install from requirements.txt, installing manually"
-            if "$pip_path" install fastapi uvicorn[standard] aiosqlite pydantic python-multipart >/dev/null 2>&1; then
+            if "$pip_path" install fastapi uvicorn[standard] aiosqlite pydantic python-multipart cryptography >/dev/null 2>&1; then
                 print_success "Installed Python dependencies manually"
             else
                 print_error "Failed to install Python dependencies"
@@ -104,7 +104,7 @@ create_virtual_environment() {
             fi
         fi
     else
-        if "$pip_path" install fastapi uvicorn[standard] aiosqlite pydantic python-multipart >/dev/null 2>&1; then
+        if "$pip_path" install fastapi uvicorn[standard] aiosqlite pydantic python-multipart cryptography >/dev/null 2>&1; then
             print_success "Installed Python dependencies"
         else
             print_error "Failed to install Python dependencies"
@@ -119,7 +119,7 @@ install_files() {
     print_step "Installing server files..."
     
     local current_dir="$(dirname "$0")"
-    local server_files=("main.py" "database.py")
+    local server_files=("main.py" "models.py" "auth.py")
     
     for file in "${server_files[@]}"; do
         if [[ -f "$current_dir/$file" ]]; then
@@ -144,6 +144,40 @@ install_files() {
 EOF
         print_success "Created default config.json"
     fi
+}
+
+generate_admin_key() {
+    print_step "Generating admin API key..."
+    
+    # Generate secure admin token
+    local admin_token="dcmon_admin_$(openssl rand -hex 16)"
+    
+    # Save admin token to secure location
+    local admin_token_file="/etc/dcmon-server/admin_token"
+    echo "$admin_token" > "$admin_token_file"
+    chmod 600 "$admin_token_file"
+    chown dcmon-server:dcmon-server "$admin_token_file"
+    
+    print_success "Generated admin token"
+    
+    # Display the admin key prominently
+    echo
+    echo "================================================================"
+    echo "🔑 IMPORTANT: Your Admin Token"
+    echo "================================================================"
+    echo
+    echo "   $admin_token"
+    echo
+    echo "⚠️  SAVE THIS TOKEN! You'll need it to:"
+    echo "   • Install clients on monitored machines"
+    echo "   • Access server dashboard and metrics"
+    echo "   • Manage the dcmon system"
+    echo
+    echo "📋 The token is also saved to: $admin_token_file"
+    echo "================================================================"
+    echo
+    
+    return 0
 }
 
 create_user() {
@@ -268,6 +302,7 @@ main() {
     install_files || exit 1
     create_virtual_environment || exit 1
     create_systemd_service || exit 1
+    generate_admin_key || exit 1
     enable_service || exit 1
     
     echo

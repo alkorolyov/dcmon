@@ -16,6 +16,7 @@ from dataclasses import asdict
 
 from client.exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, MetricPoint
 from client.fans import FanController
+from client.auth import ClientAuth, setup_client_auth
 
 # Configure logging
 logging.basicConfig(
@@ -31,10 +32,17 @@ class DCMonClient:
     def __init__(self, config_file: str = "/etc/dcmon/config.json"):
         self.config = self._load_config(config_file)
         self.machine_id = self._get_machine_id()
-        self.api_key = self._load_api_key()
+        self.hostname = self._get_hostname()
+        
+        # Initialize authentication system
+        self.auth = setup_client_auth()
+        if not self.auth:
+            raise RuntimeError("Failed to initialize client authentication")
+        
         self.session = None
         self.fan_controller = None
         self.command_check_counter = 0
+        self.registration_attempted = False
         
         # Initialize collectors
         self.collectors = [
@@ -81,13 +89,13 @@ class DCMonClient:
             # Fallback to hardware UUID
             return str(uuid.getnode())
     
-    def _load_api_key(self) -> str:
-        """Load API key from file"""
-        key_file = Path("/etc/dcmon/api_key")
-        if key_file.exists():
-            return key_file.read_text().strip()
-        else:
-            raise FileNotFoundError("API key not found. Please register client first.")
+    def _get_hostname(self) -> str:
+        """Get system hostname"""
+        try:
+            import socket
+            return socket.gethostname()
+        except:
+            return "unknown-host"
     
     def _init_exporters(self):
         """Initialize optional exporters based on configuration"""
@@ -111,8 +119,14 @@ class DCMonClient:
         """Start the client"""
         logger.info(f"Starting dcmon client (machine_id: {self.machine_id})")
         
+        # Attempt auto-registration if no auth token exists
+        if not await self._ensure_registration():
+            raise RuntimeError("Failed to register with server")
+        
+        # Create session with client token
+        client_token = self.auth.load_client_token()
         self.session = aiohttp.ClientSession(
-            headers={"Authorization": f"Bearer {self.api_key}"},
+            headers={"Authorization": f"Bearer {client_token}"},
             timeout=aiohttp.ClientTimeout(total=30)
         )
         
@@ -152,6 +166,40 @@ class DCMonClient:
             
             # Wait for next collection interval
             await asyncio.sleep(self.config["collection_interval"])
+    
+    async def _ensure_registration(self) -> bool:
+        """Ensure client is registered with server"""
+        try:
+            # Check if we already have an auth token
+            auth_token = self.auth.load_auth_token()
+            if auth_token and not self.registration_attempted:
+                # Test the token by making a simple request
+                if await self._test_auth_token(auth_token):
+                    logger.info("Using existing authentication token")
+                    return True
+                else:
+                    logger.info("Existing auth token is invalid, re-registering")
+            
+            # Auto-registration not supported - must use register_with_admin_key
+            logger.error("No valid auth token found. Registration required.")
+            logger.error("Use: python3 client.py register ADMIN_KEY SERVER_URL")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Failed to ensure registration: {e}")
+            return False
+    
+    async def _test_auth_token(self, token: str) -> bool:
+        """Test if auth token is still valid"""
+        try:
+            async with aiohttp.ClientSession(
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as session:
+                async with session.get(f"{self.config['server_url']}/api/commands/{self.machine_id}") as response:
+                    return response.status in [200, 404]  # 404 just means no commands pending
+        except:
+            return False
     
     async def _send_metrics(self, metrics: List[MetricPoint]):
         """Send metrics to server"""
@@ -296,5 +344,76 @@ async def main():
     finally:
         await client.stop()
 
+async def register_with_admin_key(admin_key: str, server_url: str, config_file: str = "/etc/dcmon/config.json") -> bool:
+    """Register client with server using admin key (one-time use during installation)"""
+    try:
+        # Initialize auth system
+        auth = setup_client_auth()
+        if not auth:
+            print("❌ Failed to initialize client authentication")
+            return False
+        
+        # Get machine info
+        machine_id = ""
+        try:
+            with open('/etc/machine-id', 'r') as f:
+                machine_id = f.read().strip()
+        except:
+            machine_id = str(uuid.getnode())
+        
+        hostname = ""
+        try:
+            import socket
+            hostname = socket.gethostname()
+        except:
+            hostname = "unknown-host"
+        
+        print(f"🔑 Registering client: {machine_id} ({hostname})")
+        
+        # Create registration payload
+        payload = auth.create_registration_payload(machine_id, hostname)
+        if not payload:
+            print("❌ Failed to create registration payload")
+            return False
+        
+        # Add admin key to payload (not stored anywhere)
+        payload['admin_key'] = admin_key
+        
+        # Send registration request
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            async with session.post(f"{server_url}/api/register", json=payload) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    auth_token = result.get('auth_token')
+                    if auth_token:
+                        # Save the auth token
+                        if auth.save_auth_token(auth_token):
+                            print("✅ Client registered successfully!")
+                            print(f"🔐 Auth token saved to /etc/dcmon/auth_token")
+                            return True
+                        else:
+                            print("❌ Failed to save auth token")
+                    else:
+                        print("❌ Server did not return auth token")
+                else:
+                    error_text = await response.text()
+                    print(f"❌ Registration failed: {response.status} - {error_text}")
+        
+        return False
+        
+    except Exception as e:
+        print(f"❌ Registration failed: {e}")
+        return False
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    import sys
+    
+    # Check if this is a registration call
+    if len(sys.argv) == 4 and sys.argv[1] == "register":
+        admin_token = sys.argv[2]
+        server_url = sys.argv[3]
+        success = asyncio.run(register_with_admin_token(admin_token, server_url))
+        sys.exit(0 if success else 1)
+    else:
+        # Normal client operation
+        asyncio.run(main())

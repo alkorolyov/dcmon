@@ -71,11 +71,16 @@ install_dependencies() {
     fi
     
     # Install Python dependencies
-    if python3 -m pip install aiohttp >/dev/null 2>&1; then
+    if python3 -m pip install -r "/opt/dcmon/requirements.txt" >/dev/null 2>&1; then
         print_success "Installed Python dependencies"
     else
-        print_error "Failed to install Python dependencies"
-        return 1
+        print_warning "Failed to install from requirements.txt, installing manually"
+        if python3 -m pip install aiohttp asyncio-throttle cryptography >/dev/null 2>&1; then
+            print_success "Installed Python dependencies manually"
+        else
+            print_error "Failed to install Python dependencies"
+            return 1
+        fi
     fi
     
     return 0
@@ -87,7 +92,7 @@ install_files() {
     local current_dir="$(dirname "$0")"
     
     # Copy main client files
-    local client_files=("client.py" "exporters.py" "fans.py")
+    local client_files=("client.py" "exporters.py" "fans.py" "auth.py")
     for file in "${client_files[@]}"; do
         if [[ -f "$current_dir/$file" ]]; then
             cp "$current_dir/$file" "/opt/dcmon/"
@@ -152,46 +157,32 @@ EOF
     print_success "Created systemd service"
 }
 
-setup_api_key() {
-    print_step "Setting up API key..."
-    
-    echo
-    echo "=================================================="
-    echo "IMPORTANT: API Key Setup Required"
-    echo "=================================================="
-    echo "You need an API key from your dcmon server."
-    echo "Contact your administrator or register at:"
-    echo "  http://your-server:8000/api/register"
-    echo
-    
-    read -p "Enter your dcmon API key: " -r api_key
-    
-    if [[ -n "$api_key" ]]; then
-        echo "$api_key" > /etc/dcmon/api_key
-        chmod 600 /etc/dcmon/api_key
-        print_success "API key saved"
-        return 0
-    else
-        print_warning "API key not set. You must set it before starting the service:"
-        echo "  echo 'YOUR_API_KEY' | sudo tee /etc/dcmon/api_key > /dev/null"
-        echo "  sudo chmod 600 /etc/dcmon/api_key"
-        return 1
-    fi
-}
-
-setup_server_url() {
-    print_step "Setting up server URL..."
+setup_server_and_register() {
+    print_step "Setting up server configuration and registering client..."
     
     local config_file="/etc/dcmon/config.json"
+    local server_url=""
+    local admin_token=""
     
     echo
-    read -p "Enter your dcmon server URL [http://localhost:8000]: " -r server_url
+    echo "dcmon Server Configuration"
+    echo "========================="
     
+    # Get server URL
+    read -p "Enter dcmon server URL [http://localhost:8000]: " -r server_url
     if [[ -z "$server_url" ]]; then
         server_url="http://localhost:8000"
     fi
     
-    # Update config.json with proper server URL
+    # Get admin token
+    echo
+    read -p "Enter admin token (from server installation): " -r admin_token
+    if [[ -z "$admin_token" ]]; then
+        print_error "Admin token is required for client registration"
+        return 1
+    fi
+    
+    # Update config.json with server URL
     if command -v python3 >/dev/null 2>&1; then
         if python3 -c "
 import json
@@ -211,11 +202,26 @@ with open('$config_file', 'w') as f: json.dump(config, f, indent=2)
         return 1
     fi
     
-    return 0
+    # Register client with server (admin key only in memory)
+    print_step "Registering client with server..."
+    echo
+    
+    if python3 /opt/dcmon/client.py register "$admin_token" "$server_url"; then
+        print_success "Client registered successfully with server!"
+        return 0
+    else
+        print_error "Client registration failed"
+        echo "Please check:"
+        echo "  1. Server is running at $server_url"
+        echo "  2. Admin key is correct"
+        echo "  3. Network connectivity"
+        return 1
+    fi
 }
 
-enable_service() {
-    print_step "Enabling service..."
+
+enable_and_start_service() {
+    print_step "Enabling and starting service..."
     
     if systemctl daemon-reload; then
         print_success "Reloaded systemd daemon"
@@ -230,29 +236,36 @@ enable_service() {
         return 1
     fi
     
-    echo
-    read -p "Start dcmon-client service now? [y/N]: " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        if systemctl start dcmon-client; then
-            print_success "Started dcmon-client service"
-            
-            echo
-            print_step "Service Status:"
-            systemctl status dcmon-client --no-pager -l
-        else
-            print_error "Failed to start service"
-            print_warning "Check the API key and server URL configuration"
-            return 1
-        fi
+    print_step "Starting dcmon-client service..."
+    if systemctl start dcmon-client; then
+        print_success "Started dcmon-client service"
+        
+        # Give it a moment to start and register
+        sleep 2
+        
+        echo
+        print_step "Service Status:"
+        systemctl status dcmon-client --no-pager -l
+        
+        echo
+        print_step "Recent logs:"
+        journalctl -u dcmon-client --no-pager -n 10
+    else
+        print_error "Failed to start service"
+        echo
+        print_step "Error logs:"
+        journalctl -u dcmon-client --no-pager -n 20
+        return 1
     fi
     
     return 0
 }
 
 main() {
-    echo "dcmon Client Installer"
-    echo "======================"
+    echo "dcmon Client Installer V2"
+    echo "========================="
+    echo "🔐 Automatic registration with cryptographic keys"
+    echo
     
     check_root
     
@@ -265,33 +278,35 @@ main() {
     install_files || exit 1
     create_systemd_service || exit 1
     
-    # Setup configuration
-    setup_server_url || exit 1
-    has_api_key=$(setup_api_key && echo 1 || echo 0)
+    # Setup configuration and register (prompts for server URL and admin key)
+    setup_server_and_register || exit 1
     
-    if [[ $has_api_key -eq 1 ]]; then
-        enable_service || exit 1
-    else
-        print_warning "Service is installed but not started."
-        echo "Set your API key and then run:"
-        echo "  sudo systemctl start dcmon-client"
-    fi
+    # Enable and start service (auto-registration happens on first start)
+    enable_and_start_service || exit 1
     
     echo
     echo "========================================"
     print_success "Installation complete!"
     echo
+    echo "🎉 Client will automatically register with the server"
+    echo "🔑 Cryptographic keys generated automatically"
+    echo "📊 Metrics collection started"
+    echo
     echo "Useful commands:"
-    echo "  sudo systemctl status dcmon-client    # Check status"
-    echo "  sudo systemctl restart dcmon-client   # Restart service"
-    echo "  sudo journalctl -u dcmon-client -f    # Follow logs"
+    echo "  sudo systemctl status dcmon-client     # Check status"
+    echo "  sudo systemctl restart dcmon-client    # Restart service"
+    echo "  sudo journalctl -u dcmon-client -f     # Follow logs"
     echo
     echo "Configuration files:"
-    echo "  /etc/dcmon/config.json               # Client configuration"
-    echo "  /etc/dcmon/api_key                   # API key"
+    echo "  /etc/dcmon/config.json                 # Client configuration"
+    echo "  /etc/dcmon/client.key                  # Private key (auto-generated)"
+    echo "  /etc/dcmon/client.pub                  # Public key (auto-generated)"
+    echo "  /etc/dcmon/client_token               # Client token (auto-generated)"
     echo
-    echo "Log files:"
-    echo "  sudo journalctl -u dcmon-client      # Service logs"
+    echo "If registration fails, check:"
+    echo "  1. Server is running and accessible"
+    echo "  2. Server URL is correct in config.json"
+    echo "  3. Check logs: sudo journalctl -u dcmon-client"
 }
 
 main "$@"
