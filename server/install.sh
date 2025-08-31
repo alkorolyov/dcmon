@@ -94,22 +94,10 @@ create_virtual_environment() {
     if [[ -f "$requirements_file" ]]; then
         if "$pip_path" install -r "$requirements_file" >/dev/null 2>&1; then
             print_success "Installed Python dependencies from requirements.txt"
-        else
-            print_warning "Failed to install from requirements.txt, installing manually"
-            if "$pip_path" install fastapi uvicorn[standard] aiosqlite pydantic python-multipart cryptography >/dev/null 2>&1; then
-                print_success "Installed Python dependencies manually"
-            else
-                print_error "Failed to install Python dependencies"
-                return 1
-            fi
         fi
     else
-        if "$pip_path" install fastapi uvicorn[standard] aiosqlite pydantic python-multipart cryptography >/dev/null 2>&1; then
-            print_success "Installed Python dependencies"
-        else
-            print_error "Failed to install Python dependencies"
-            return 1
-        fi
+        print_error "Failed to install Python dependencies: requirements.txt is missing"
+        return 1
     fi
     
     return 0
@@ -119,7 +107,7 @@ install_files() {
     print_step "Installing server files..."
     
     local current_dir="$(dirname "$0")"
-    local server_files=("main.py" "models.py" "auth.py")
+    local server_files=("main.py" "models.py" "auth.py" "config_loader.py")
     
     for file in "${server_files[@]}"; do
         if [[ -f "$current_dir/$file" ]]; then
@@ -130,19 +118,34 @@ install_files() {
         fi
     done
     
-    # Create default config
-    local config_file="/etc/dcmon-server/config.json"
-    if [[ ! -f "$config_file" ]]; then
-        cat > "$config_file" << 'EOF'
-{
-  "database_path": "/var/lib/dcmon/dcmon.db",
-  "host": "0.0.0.0",
-  "port": 8000,
-  "log_level": "info",
-  "cleanup_days": 7
-}
+    # Create main config file
+    local main_config="/etc/dcmon-server/config.yaml"
+    if [[ ! -f "$main_config" ]]; then
+        cat > "$main_config" << 'EOF'
+# dcmon Server Configuration
+# Simple and essential settings only
+
+# Server binding
+host: "0.0.0.0"
+port: 8000
+
+# Database
+database_path: "/var/lib/dcmon/dcmon.db"
+
+# Authentication  
+admin_token_file: "/etc/dcmon-server/admin_token"
+
+# Logging
+log_level: "INFO"  # INFO or DEBUG
+
+# Data retention (important for disk space)
+metrics_days: 30        # Keep metrics for 30 days
+cleanup_interval: 3600  # Cleanup every hour (seconds)
+
+# Test mode (use test admin token if no file found)
+test_mode: false
 EOF
-        print_success "Created default config.json"
+        print_success "Created main config.yaml"
     fi
 }
 
@@ -231,7 +234,7 @@ User=dcmon-server
 Group=dcmon-server
 WorkingDirectory=/opt/dcmon-server
 Environment=PATH=/opt/dcmon-server/venv/bin
-ExecStart=/opt/dcmon-server/venv/bin/python main.py
+ExecStart=/opt/dcmon-server/venv/bin/python main.py -c /etc/dcmon-server/config.yaml
 Restart=always
 RestartSec=10
 StandardOutput=journal

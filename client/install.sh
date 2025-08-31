@@ -74,13 +74,8 @@ install_dependencies() {
     if python3 -m pip install -r "/opt/dcmon/requirements.txt" >/dev/null 2>&1; then
         print_success "Installed Python dependencies"
     else
-        print_warning "Failed to install from requirements.txt, installing manually"
-        if python3 -m pip install aiohttp asyncio-throttle cryptography >/dev/null 2>&1; then
-            print_success "Installed Python dependencies manually"
-        else
-            print_error "Failed to install Python dependencies"
-            return 1
-        fi
+        print_error "Failed to install Python dependencies: requirements.txt is missing"
+        return 1
     fi
     
     return 0
@@ -111,21 +106,19 @@ install_files() {
     fi
     
     # Create default config if it doesn't exist
-    local config_file="/etc/dcmon/config.json"
+    local config_file="/etc/dcmon/config.yaml"
     if [[ ! -f "$config_file" ]]; then
         cat > "$config_file" << 'EOF'
-{
-  "server_url": "http://your-server.com:8000",
-  "collection_interval": 30,
-  "exporters": {
-    "ipmi": true,
-    "apt": true,
-    "nvme": true,
-    "nvsmi": true
-  }
-}
+server_url: "http://your-server.com:8000"
+collection_interval: 30
+exporters:
+  ipmi: true
+  apt: true
+  nvme: true
+  nvsmi: true
+log_level: "INFO"
 EOF
-        print_success "Created default config.json"
+        print_success "Created default config.yaml"
     fi
 }
 
@@ -143,7 +136,7 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/opt/dcmon
-ExecStart=/usr/bin/python3 /opt/dcmon/client.py
+ExecStart=/usr/bin/python3 /opt/dcmon/client.py -c /etc/dcmon/config.yaml
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -160,7 +153,7 @@ EOF
 setup_server_and_register() {
     print_step "Setting up server configuration and registering client..."
     
-    local config_file="/etc/dcmon/config.json"
+    local config_file="/etc/dcmon/config.yaml"
     local server_url=""
     local admin_token=""
     
@@ -182,17 +175,17 @@ setup_server_and_register() {
         return 1
     fi
     
-    # Update config.json with server URL
+    # Update config.yaml with server URL
     if command -v python3 >/dev/null 2>&1; then
         if python3 -c "
-import json
-with open('$config_file', 'r') as f: config = json.load(f)
+import yaml
+with open('$config_file', 'r') as f: config = yaml.safe_load(f)
 config['server_url'] = '$server_url'
-with open('$config_file', 'w') as f: json.dump(config, f, indent=2)
+with open('$config_file', 'w') as f: yaml.dump(config, f, default_flow_style=False)
 " 2>/dev/null; then
             print_success "Updated server URL to: $server_url"
         else
-            print_warning "Failed to update config.json automatically"
+            print_warning "Failed to update config.yaml automatically"
             echo "Please manually update server_url in $config_file"
             return 1
         fi
@@ -298,14 +291,14 @@ main() {
     echo "  sudo journalctl -u dcmon-client -f     # Follow logs"
     echo
     echo "Configuration files:"
-    echo "  /etc/dcmon/config.json                 # Client configuration"
+    echo "  /etc/dcmon/config.yaml                 # Client configuration"
     echo "  /etc/dcmon/client.key                  # Private key (auto-generated)"
     echo "  /etc/dcmon/client.pub                  # Public key (auto-generated)"
     echo "  /etc/dcmon/client_token               # Client token (auto-generated)"
     echo
     echo "If registration fails, check:"
     echo "  1. Server is running and accessible"
-    echo "  2. Server URL is correct in config.json"
+    echo "  2. Server URL is correct in config.yaml"
     echo "  3. Check logs: sudo journalctl -u dcmon-client"
 }
 

@@ -6,7 +6,7 @@ Collects system metrics and sends them to dcmon server
 
 import asyncio
 import aiohttp
-import json
+import yaml
 import logging
 import time
 import uuid
@@ -18,19 +18,15 @@ from client.exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeE
 from client.fans import FanController
 from client.auth import ClientAuth, setup_client_auth
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Logger will be configured in main()
 logger = logging.getLogger('dcmon-client')
 
 
 class DCMonClient:
     """Main dcmon client application"""
     
-    def __init__(self, config_file: str = "/etc/dcmon/config.json"):
-        self.config = self._load_config(config_file)
+    def __init__(self, config: dict):
+        self.config = config
         self.machine_id = self._get_machine_id()
         self.hostname = self._get_hostname()
         
@@ -56,30 +52,6 @@ class DCMonClient:
         if self.config["exporters"].get("ipmi", False):
             self.fan_controller = FanController()
         
-    def _load_config(self, config_file: str) -> Dict[str, Any]:
-        """Load configuration from file"""
-        default_config = {
-            "server_url": "https://localhost:8000",
-            "collection_interval": 30,
-            "exporters": {
-                "ipmi": True,
-                "apt": True,
-                "nvme": True,
-                "nvsmi": True
-            }
-        }
-        
-        try:
-            with open(config_file, 'r') as f:
-                user_config = json.load(f)
-                default_config.update(user_config)
-        except FileNotFoundError:
-            logger.info(f"Config file not found: {config_file}, using defaults")
-        except Exception as e:
-            logger.error(f"Failed to load config: {e}, using defaults")
-            
-        return default_config
-    
     def _get_machine_id(self) -> str:
         """Get unique machine identifier"""
         try:
@@ -333,9 +305,28 @@ class DCMonClient:
         except Exception as e:
             logger.error(f"Failed to send command result: {e}")
 
-async def main():
+def load_config(config_file: str) -> Dict[str, Any]:
+    """Load configuration from YAML file"""
+    logger.info(f"Loading configuration from: {config_file}")
+    with open(config_file, 'r') as f:
+        return yaml.safe_load(f)
+
+async def main(config_file: str = "config.yaml"):
     """Main entry point"""
-    client = DCMonClient()
+    # Set up basic logging first
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Load config
+    config = load_config(config_file)
+    
+    # Update logging level based on config
+    log_level = getattr(logging, config.get("log_level", "INFO").upper())
+    logging.getLogger().setLevel(log_level)
+    
+    client = DCMonClient(config)
     
     try:
         await client.start()
@@ -407,13 +398,10 @@ async def register_with_admin_key(admin_key: str, server_url: str, config_file: 
 
 if __name__ == "__main__":
     import sys
+    import argparse
     
-    # Check if this is a registration call
-    if len(sys.argv) == 4 and sys.argv[1] == "register":
-        admin_token = sys.argv[2]
-        server_url = sys.argv[3]
-        success = asyncio.run(register_with_admin_token(admin_token, server_url))
-        sys.exit(0 if success else 1)
-    else:
-        # Normal client operation
-        asyncio.run(main())
+    parser = argparse.ArgumentParser(description="dcmon Client")
+    parser.add_argument("-c", "--config", default="config.yaml", help="Configuration file path")
+    
+    args = parser.parse_args()
+    asyncio.run(main(args.config))
