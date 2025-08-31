@@ -187,6 +187,17 @@ def create_app(config: ServerConfig) -> FastAPI:
         challenge: str
         signature: str
         timestamp: int
+        # System identification
+        machine_id: str
+        # Hardware inventory fields (optional)
+        mdb_name: Optional[str] = None
+        cpu_name: Optional[str] = None
+        gpu_name: Optional[str] = None
+        gpu_count: Optional[int] = None
+        ram_gb: Optional[int] = None
+        cpu_cores: Optional[int] = None
+        disk_name: Optional[str] = None
+        disk_size: Optional[int] = None
 
     class MetricRecord(BaseModel):
         timestamp: int
@@ -221,11 +232,32 @@ def create_app(config: ServerConfig) -> FastAPI:
         if not vr.get("valid"):
             raise HTTPException(status_code=422, detail=vr.get("error") or "invalid request")
 
+        # Check if client with this machine_id already exists
+        existing_client = Client.get_by_machine_id(request.machine_id)
+        if existing_client:
+            # Update last_seen and return existing client
+            existing_client.update_last_seen()
+            return {
+                "client_id": existing_client.id, 
+                "client_token": existing_client.client_token,
+                "message": "Client already registered, using existing token"
+            }
+
         client_token = auth_service.generate_client_token()
         client_id = db_manager.register_client(
             hostname=vr["hostname"],
             client_token=client_token,
+            machine_id=request.machine_id,
             public_key=vr["public_key"],
+            # Hardware inventory
+            mdb_name=request.mdb_name,
+            cpu_name=request.cpu_name,
+            gpu_name=request.gpu_name,
+            gpu_count=request.gpu_count,
+            ram_gb=request.ram_gb,
+            cpu_cores=request.cpu_cores,
+            disk_name=request.disk_name,
+            disk_size=request.disk_size,
         )
         if client_id is None:
             raise HTTPException(status_code=500, detail="failed to register client")

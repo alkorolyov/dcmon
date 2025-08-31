@@ -91,6 +91,145 @@ def print_registration_instructions(server_base: str, req_path: Path, auth_dir: 
     )
 
 
+# ---------------- Hardware detection ----------------
+
+def detect_motherboard() -> Optional[str]:
+    """Detect motherboard name from DMI."""
+    try:
+        vendor_path = Path("/sys/class/dmi/id/board_vendor")
+        name_path = Path("/sys/class/dmi/id/board_name")
+        
+        vendor = vendor_path.read_text().strip() if vendor_path.exists() else ""
+        name = name_path.read_text().strip() if name_path.exists() else ""
+        
+        if vendor and name:
+            return f"{vendor} {name}"
+        elif name:
+            return name
+        elif vendor:
+            return vendor
+        return None
+    except Exception:
+        return None
+
+def detect_cpu() -> tuple[Optional[str], Optional[int]]:
+    """Detect CPU name and core count from /proc/cpuinfo."""
+    try:
+        cpu_name = None
+        core_count = 0
+        
+        with open("/proc/cpuinfo", "r") as f:
+            for line in f:
+                if line.startswith("model name") and cpu_name is None:
+                    cpu_name = line.split(":", 1)[1].strip()
+                elif line.startswith("processor"):
+                    core_count += 1
+        
+        return cpu_name, core_count if core_count > 0 else None
+    except Exception:
+        return None, None
+
+def detect_memory() -> Optional[int]:
+    """Detect total RAM in GB from /proc/meminfo."""
+    try:
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    kb = int(line.split()[1])
+                    gb = round(kb / 1024 / 1024)
+                    return gb
+        return None
+    except Exception:
+        return None
+
+def detect_gpu() -> tuple[Optional[str], Optional[int]]:
+    """Detect primary GPU name and count."""
+    try:
+        # Try nvidia-smi first
+        result = os.popen("nvidia-smi --query-gpu=name --format=csv,noheader,nounits 2>/dev/null").read().strip()
+        if result:
+            gpus = result.split('\n')
+            gpu_count = len(gpus)
+            primary_gpu = gpus[0].strip()
+            return primary_gpu, gpu_count
+        
+        # Fallback to lspci for other GPUs
+        result = os.popen("lspci | grep -i vga 2>/dev/null").read().strip()
+        if result:
+            lines = result.split('\n')
+            gpu_count = len(lines)
+            # Extract GPU name from first line
+            if ':' in lines[0]:
+                primary_gpu = lines[0].split(':', 1)[1].strip()
+                return primary_gpu, gpu_count
+        
+        return None, None
+    except Exception:
+        return None, None
+
+def detect_machine_id() -> str:
+    """Read machine ID from /etc/machine-id."""
+    return Path("/etc/machine-id").read_text().strip()
+
+def detect_disk() -> tuple[Optional[str], Optional[int]]:
+    """Detect primary disk name and size."""
+    try:
+        # Use lsblk to get physical disk info, excluding loops/virtual devices
+        result = os.popen("lsblk -d -n -o NAME,SIZE,MODEL 2>/dev/null | grep -E '^(sd|nvme|hd)' | head -1").read().strip()
+        LOG.debug(f"lsblk command result: '{result}'")
+        
+        if result:
+            parts = result.split()
+            LOG.debug(f"lsblk parts: {parts}")
+            
+            if len(parts) >= 2:
+                size_str = parts[1]  # e.g., "500G", "1.8T"  
+                model = ' '.join(parts[2:]) if len(parts) > 2 else None
+                LOG.debug(f"size_str: '{size_str}', model: '{model}'")
+                
+                # Parse size to GB
+                size_gb = None
+                if size_str.endswith('G'):
+                    size_gb = int(float(size_str[:-1]))
+                elif size_str.endswith('T'):
+                    size_gb = int(float(size_str[:-1]) * 1024)
+                elif size_str.endswith('M'):
+                    size_gb = int(float(size_str[:-1]) / 1024)
+                
+                LOG.debug(f"parsed size_gb: {size_gb}")
+                LOG.debug(f"returning disk_name='{model}', disk_size={size_gb}")
+                return model, size_gb
+        
+        LOG.debug("no disk result found, returning None, None")
+        return None, None
+    except Exception as e:
+        LOG.debug(f"detect_disk exception: {e}")
+        return None, None
+
+def detect_hardware() -> Dict[str, Any]:
+    """Detect all hardware information."""
+    machine_id = detect_machine_id()
+    mdb_name = detect_motherboard()
+    cpu_name, cpu_cores = detect_cpu()
+    ram_gb = detect_memory()
+    gpu_name, gpu_count = detect_gpu()
+    disk_name, disk_size = detect_disk()
+    
+    hardware = {
+        "machine_id": machine_id,
+        "mdb_name": mdb_name,
+        "cpu_name": cpu_name,
+        "gpu_name": gpu_name,
+        "gpu_count": gpu_count,
+        "ram_gb": ram_gb,
+        "cpu_cores": cpu_cores,
+        "disk_name": disk_name,
+        "disk_size": disk_size,
+    }
+    
+    LOG.debug(f"detect_hardware result: {hardware}")
+    return hardware
+
 # ---------------- Metrics collection (stdlib only) ----------------
 
 def _now() -> int:
@@ -170,7 +309,15 @@ def register_client_interactively(auth: ClientAuth, server_base: str, hostname: 
     if not req:
         raise SystemExit("ERROR: Failed to create registration request (keys missing or crypto error).")
     
-    # Add admin token to request (only in memory)
+    # Detect hardware information
+    print("🔍 Detecting hardware specifications...")
+    hardware = detect_hardware()
+    
+    # Add hardware info to registration request
+    req.update(hardware)
+    LOG.debug(f"registration request with hardware: {req}")
+    
+    # Add admin token to request (only in memory)  
     req["admin_token"] = admin_token
     
     # Send registration request

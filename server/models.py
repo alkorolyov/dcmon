@@ -43,6 +43,19 @@ class Client(BaseModel):
     status = CharField(default="active")
     public_key = TextField(null=True)   # PEM (server verifies signatures with this)
     created_at = IntegerField()
+    
+    # System identification
+    machine_id = CharField(unique=True)  # /etc/machine-id for duplicate prevention
+    
+    # Hardware inventory fields
+    mdb_name = CharField(null=True)      # Motherboard name
+    cpu_name = CharField(null=True)      # CPU model name  
+    gpu_name = CharField(null=True)      # Primary GPU name
+    gpu_count = IntegerField(null=True)  # Number of GPUs
+    ram_gb = IntegerField(null=True)     # Total RAM in GB
+    cpu_cores = IntegerField(null=True)  # Number of CPU cores
+    disk_name = CharField(null=True)     # Primary disk name
+    disk_size = IntegerField(null=True)  # Primary disk size in GB
 
     class Meta:
         indexes = (
@@ -53,6 +66,13 @@ class Client(BaseModel):
     def get_by_token(cls, token: str) -> Optional["Client"]:
         try:
             return cls.get(cls.client_token == token)
+        except cls.DoesNotExist:
+            return None
+
+    @classmethod
+    def get_by_machine_id(cls, machine_id: str) -> Optional["Client"]:
+        try:
+            return cls.get(cls.machine_id == machine_id)
         except cls.DoesNotExist:
             return None
 
@@ -67,6 +87,16 @@ class Client(BaseModel):
             "last_seen": self.last_seen,
             "status": self.status,
             "created_at": self.created_at,
+            "machine_id": self.machine_id,
+            # Hardware inventory
+            "mdb_name": self.mdb_name,
+            "cpu_name": self.cpu_name,
+            "gpu_name": self.gpu_name,
+            "gpu_count": self.gpu_count,
+            "ram_gb": self.ram_gb,
+            "cpu_cores": self.cpu_cores,
+            "disk_name": self.disk_name,
+            "disk_size": self.disk_size,
         }
 
 
@@ -250,9 +280,24 @@ class DatabaseManager:
     # ---- convenience API used by the app ----
 
     @staticmethod
-    def register_client(*, hostname: Optional[str], client_token: str, public_key: Optional[str] = None) -> Optional[int]:
+    def register_client(
+        *, 
+        hostname: Optional[str], 
+        client_token: str, 
+        machine_id: str,
+        public_key: Optional[str] = None,
+        # Hardware inventory fields
+        mdb_name: Optional[str] = None,
+        cpu_name: Optional[str] = None,
+        gpu_name: Optional[str] = None,
+        gpu_count: Optional[int] = None,
+        ram_gb: Optional[int] = None,
+        cpu_cores: Optional[int] = None,
+        disk_name: Optional[str] = None,
+        disk_size: Optional[int] = None,
+    ) -> Optional[int]:
         """
-        Minimal registration: always creates a new client row.
+        Register a new client with hardware inventory.
         Returns the new client_id (int) or None on failure.
         """
         try:
@@ -260,10 +305,20 @@ class DatabaseManager:
             client = Client.create(
                 client_token=client_token,
                 hostname=hostname,
+                machine_id=machine_id,
                 last_seen=now,
                 status="active",
                 public_key=public_key,
                 created_at=now,
+                # Hardware fields
+                mdb_name=mdb_name,
+                cpu_name=cpu_name,
+                gpu_name=gpu_name,
+                gpu_count=gpu_count,
+                ram_gb=ram_gb,
+                cpu_cores=cpu_cores,
+                disk_name=disk_name,
+                disk_size=disk_size,
             )
             return int(client.id)
         except Exception as e:
