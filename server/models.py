@@ -212,6 +212,37 @@ class DatabaseManager:
             logger.error(f"Failed to get database stats: {e}")
             return {}
 
+    @staticmethod
+    def register_client(machine_id: str,
+                        hostname: Optional[str],
+                        client_token: str) -> bool:
+        """
+        Register or update a client (by machine_id).
+        Matches the old database.py `register_client` semantics.
+        """
+        try:
+            ts_now = int(time.time())
+            (Client.insert(
+                machine_id=machine_id,
+                client_token=client_token,
+                hostname=hostname,
+                last_seen=ts_now,
+                status='active',
+                created_at=ts_now
+            ).on_conflict(
+                conflict_target=[Client.machine_id],
+                update={
+                    Client.client_token: client_token,
+                    Client.hostname: hostname,
+                    Client.last_seen: ts_now,
+                    Client.status: 'active',
+                    Client.created_at: ts_now,
+                }
+            ).execute())
+            return True
+        except Exception as e:
+            logger.error(f"Failed to register client {machine_id}: {e}")
+            return False
 
 # Global database manager
 db_manager = DatabaseManager()

@@ -184,7 +184,6 @@ class ClientAuth:
                 "challenge": challenge_data,
                 "signature": signature,
                 "timestamp": timestamp,
-                "auth_version": "v2"
             }
             
         except Exception as e:

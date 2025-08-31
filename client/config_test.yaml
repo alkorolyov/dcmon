@@ -1,5 +1,5 @@
 server_url: "http://localhost:8000"
-auth_config_dir: "/etc/dcmon"
+auth_config_dir: "/home/ergot/projects/dcmon/client"
 collection_interval: 30
 exporters:
   ipmi: true

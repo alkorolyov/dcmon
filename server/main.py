@@ -5,25 +5,16 @@ Simplified version focusing on V2 authentication
 """
 
 import logging
-import time
-import json
-from typing import Dict, Any, List
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
 
-from models import DatabaseManager, Client, Metric, Command, get_db
-from auth import get_server_auth
-from config import get_config, Config, load_config
-from routes import create_routes
+from models import DatabaseManager, get_db
+from config import Config, load_config
+from routes import create_routes, create_auth_dependency
 
 # Logger will be configured in main()
 logger = logging.getLogger('dcmon-server')
-
-# Security
-security = HTTPBearer()
 
 # Load admin token from config
 def load_admin_token(config: Config) -> str:
@@ -43,65 +34,9 @@ def load_admin_token(config: Config) -> str:
         logger.error(f"Failed to load admin token: {e}")
         return "dcmon_admin_test123"
 
-# Global variables set by create_app()
-get_admin_auth = None
-ADMIN_TOKEN = None
-
-def create_auth_dependency(admin_token: str):
-    """Create authentication dependency with the given admin token"""
-    async def auth_dependency(credentials: HTTPAuthorizationCredentials = Depends(security)) -> bool:
-        """Authenticate admin requests"""
-        if credentials.credentials != admin_token:
-            raise HTTPException(status_code=401, detail="Invalid admin token")
-        return True
-    return auth_dependency
-
-async def get_current_client(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Client:
-    """Authenticate client by client token"""
-    token = credentials.credentials
-    client = Client.get_by_client_token(token)
-    
-    if not client:
-        raise HTTPException(status_code=401, detail="Invalid client token")
-    
-    if client.status != 'active':
-        raise HTTPException(status_code=403, detail="Client is not active")
-    
-    return client
-
-# Pydantic models
-class ClientRegistration(BaseModel):
-    machine_id: str
-    hostname: str
-    public_key: str
-    challenge: str
-    signature: str
-    timestamp: int
-    auth_version: str = "v2"
-    admin_token: str
 
 
-class MetricData(BaseModel):
-    name: str
-    value: float
-    timestamp: int
-    labels: Dict[str, str] = None
 
-class MetricsSubmission(BaseModel):
-    machine_id: str
-    timestamp: int
-    metrics: List[MetricData]
-
-class CommandRequest(BaseModel):
-    machine_id: str
-    command_type: str
-    command_data: Dict[str, Any]
-
-class CommandResult(BaseModel):
-    machine_id: str
-    command_id: str
-    timestamp: int
-    result: Dict[str, Any]
 
 def create_lifespan(config: Config):
     """Create lifespan manager with the given config"""

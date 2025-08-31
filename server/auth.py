@@ -73,12 +73,7 @@ class ServerAuth:
                     result['error'] = f'Missing required field: {field}'
                     return result
             
-            # Check auth version (for backward compatibility)
-            auth_version = payload.get('auth_version', 'v1')
-            if auth_version != 'v2':
-                result['error'] = f'Unsupported auth version: {auth_version}'
-                return result
-            
+
             # Validate timestamp (not too old, not in future)
             timestamp = payload['timestamp']
             current_time = int(time.time())

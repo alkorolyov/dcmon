@@ -24,6 +24,7 @@ class ClientRegistration(BaseModel):
     machine_id: str
     hostname: str
     public_key: str
+    challenge: str
     timestamp: int
     signature: str
 
@@ -112,9 +113,10 @@ def create_routes(admin_token: str) -> APIRouter:
             
             machine_id = validation_result['machine_id']
             hostname = validation_result['hostname']
+            public_key = validation_result['public_key']
             
             # Generate client token
-            client_token = server_auth.generate_client_token()
+            client_token = server_auth.generate_client_token(machine_id, public_key)
             
             # Store client in database
             db_manager = get_db()

@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import Dict, List, Any
 from dataclasses import asdict
 
-from client.exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, MetricPoint
-from client.fans import FanController
-from client.auth import ClientAuth, setup_client_auth
+from exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, MetricPoint
+from fans import FanController
+from auth import ClientAuth, setup_client_auth
 
 # Logger will be configured in main()
 logger = logging.getLogger('dcmon-client')
@@ -31,7 +31,7 @@ class DCMonClient:
         self.hostname = self._get_hostname()
         
         # Initialize authentication system
-        self.auth = setup_client_auth()
+        self.auth = setup_client_auth(self.config["auth_config_dir"])
         if not self.auth:
             raise RuntimeError("Failed to initialize client authentication")
         
@@ -143,7 +143,7 @@ class DCMonClient:
         """Ensure client is registered with server"""
         try:
             # Check if we already have an auth token
-            auth_token = self.auth.load_auth_token()
+            auth_token = self.auth.load_client_token()
             if auth_token and not self.registration_attempted:
                 # Test the token by making a simple request
                 if await self._test_auth_token(auth_token):
@@ -335,11 +335,11 @@ async def main(config_file: str = "config.yaml"):
     finally:
         await client.stop()
 
-async def register_with_admin_key(admin_key: str, server_url: str, config_file: str = "/etc/dcmon/config.json") -> bool:
+async def register_with_admin_token(admin_token: str, server_url: str, auth_config_dir: str) -> bool:
     """Register client with server using admin key (one-time use during installation)"""
     try:
         # Initialize auth system
-        auth = setup_client_auth()
+        auth = setup_client_auth(auth_config_dir)
         if not auth:
             print("❌ Failed to initialize client authentication")
             return False
@@ -368,19 +368,19 @@ async def register_with_admin_key(admin_key: str, server_url: str, config_file: 
             return False
         
         # Add admin key to payload (not stored anywhere)
-        payload['admin_key'] = admin_key
+        payload['admin_token'] = admin_token
         
         # Send registration request
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
             async with session.post(f"{server_url}/api/register", json=payload) as response:
                 if response.status == 200:
                     result = await response.json()
-                    auth_token = result.get('auth_token')
+                    auth_token = result.get('client_token')
                     if auth_token:
                         # Save the auth token
-                        if auth.save_auth_token(auth_token):
+                        if auth.save_client_token(auth_token):
                             print("✅ Client registered successfully!")
-                            print(f"🔐 Auth token saved to /etc/dcmon/auth_token")
+                            print(f"🔐 Auth token saved to {auth.token_file}")
                             return True
                         else:
                             print("❌ Failed to save auth token")
