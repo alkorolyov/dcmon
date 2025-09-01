@@ -107,7 +107,7 @@ class ClientAuth:
         """Load the private key object and public key PEM string."""
         try:
             priv_bytes = self.private_key_file.read_bytes()
-            private_key = load_pem_private_key(priv_bytes, password=None)
+            private_key = load_pem_private_key(priv_bytes, password=None, backend=default_backend())
             public_pem = self.public_key_file.read_text().strip()
             return private_key, public_pem
         except Exception as e:
