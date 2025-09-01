@@ -54,7 +54,7 @@ LOG = logging.getLogger("dcmon.client")
 class ClientConfig:
     """Client configuration with defaults"""
     auth_dir: str = "/etc/dcmon"
-    server: str = "http://127.0.0.1:8000"
+    server: str = "https://127.0.0.1:8000"
     interval: int = 30
     log_level: str = "INFO"
     once: bool = False
@@ -102,12 +102,37 @@ class ClientConfig:
 
 # ---------------- HTTP helpers ----------------
 
+def _create_ssl_context():
+    """Create SSL context for HTTPS that auto-trusts server certificates"""
+    import ssl
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    return ssl_context
+
+
 def _post_json(url: str, data: Dict[str, Any], headers: Dict[str, str], timeout: int = 10) -> Dict[str, Any]:
     body = json.dumps(data).encode("utf-8")
     hdrs = {"Content-Type": "application/json"}
     hdrs.update(headers or {})
     req = Request(url, data=body, headers=hdrs, method="POST")
-    with urlopen(req, timeout=timeout) as resp:
+    
+    # Use SSL context for HTTPS URLs
+    ssl_context = _create_ssl_context() if url.startswith("https://") else None
+    
+    with urlopen(req, timeout=timeout, context=ssl_context) as resp:
+        raw = resp.read().decode("utf-8")
+        return json.loads(raw) if raw else {}
+
+
+def _get_json(url: str, headers: Dict[str, str], timeout: int = 10) -> Dict[str, Any]:
+    """GET request helper with HTTPS auto-trust support"""
+    req = Request(url, headers=headers or {}, method="GET")
+    
+    # Use SSL context for HTTPS URLs
+    ssl_context = _create_ssl_context() if url.startswith("https://") else None
+    
+    with urlopen(req, timeout=timeout, context=ssl_context) as resp:
         raw = resp.read().decode("utf-8")
         return json.loads(raw) if raw else {}
 
@@ -514,8 +539,8 @@ def main():
                         help="YAML configuration file (default: config.yaml)")
     parser.add_argument("--auth-dir", default="/etc/dcmon", dest="auth_dir",
                         help="directory for client credentials (private key, public key, client token)")
-    parser.add_argument("--server", default="http://127.0.0.1:8000",
-                        help="dcmon server base URL (e.g., http://server:8000)")
+    parser.add_argument("--server", default="https://127.0.0.1:8000",
+                        help="dcmon server base URL (e.g., https://server:8000)")
     parser.add_argument("--interval", type=int, default=30,
                         help="seconds between metric posts")
     parser.add_argument("--once", action="store_true",

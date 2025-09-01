@@ -1,4 +1,4 @@
-server: "http://localhost:8000"
+server: "https://localhost:8000"
 auth_dir: "/etc/dcmon"
 interval: 30
 exporters:

@@ -1,12 +1,17 @@
 # Server binding
-host: "0.0.0.0"
+host: "127.0.0.1"
 port: 8000
 
 # Logging
-log_level: "DEBUG"  # INFO or DEBUG
+log_level: "DEBUG"
 
-# Data retention (important for disk space)
-metrics_days: 1        # Keep metrics for 30 days
+# Data retention
+metrics_days: 1
 
-# Test mode (use test admin token if no file found)
-test_mode: true
+# File paths - explicit configuration
+auth_dir: "."                    # All security files in current directory
+db_path: "./dcmon.db"           # Database in current directory
+
+# Behavior controls
+test_mode: true                 # Allow consistent dev admin token fallback
+use_tls: true                   # Enable HTTPS

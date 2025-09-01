@@ -1,9 +1,11 @@
-server_url: "http://localhost:8000"
-auth_config_dir: "."
-collection_interval: 30
+server: "https://localhost:8000"
+auth_dir: "."
+interval: 30
 exporters:
+  os: true
   ipmi: true
   apt: true
   nvme: true
   nvsmi: true
-log_level: "INFO"
+  bmc_fan: true
+log_level: "DEBUG"

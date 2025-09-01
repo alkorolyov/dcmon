@@ -3,10 +3,15 @@ host: "0.0.0.0"
 port: 8000
 
 # Logging
-log_level: "INFO"  # INFO or DEBUG
+log_level: "INFO"
 
-# Data retention (important for disk space)
-metrics_days: 30        # Keep metrics for 30 days
+# Data retention
+metrics_days: 30
 
-# Test mode (use test admin token if no file found)
-test_mode: true
+# File paths - explicit configuration
+auth_dir: "/etc/dcmon-server"                      # All security files directory
+db_path: "/var/lib/dcmon-server/dcmon.db"          # Database file path
+
+# Behavior controls
+test_mode: false                # Require admin token file (no fallback)
+use_tls: true                   # Enable HTTPS

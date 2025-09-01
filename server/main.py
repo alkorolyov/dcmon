@@ -49,7 +49,12 @@ class ServerConfig(BaseModel):
     port: int = 8000
     log_level: str = "INFO"
     metrics_days: int = 7
-    test_mode: bool = False
+    # File paths - explicit configuration
+    auth_dir: str
+    db_path: str
+    # Behavior controls
+    test_mode: bool = False          # Only controls admin token fallback
+    use_tls: bool = False           # Controls HTTPS on/off
 
 
 def load_config_from(path: str) -> ServerConfig:
@@ -62,16 +67,19 @@ def load_config_from(path: str) -> ServerConfig:
 
 def _resolve_paths(cfg: ServerConfig):
     """
-    Return (db_path, admin_token_path, allow_ephemeral_admin_token)
-    based on test_mode.
+    Return (db_path, admin_token_path, allow_ephemeral_admin_token, cert_path, key_path)
+    based on explicit config paths.
     """
     from pathlib import Path
-    if cfg.test_mode:
-        return (Path.cwd() / "dcmon.db", Path.cwd() / "admin_token", True)
-    else:
-        return (Path("/var/lib/dcmon-server/dcmon.db"),
-                Path("/etc/dcmon-server/admin_token"),
-                False)
+    auth_dir = Path(cfg.auth_dir)
+    
+    return (
+        Path(cfg.db_path),                    # Database at explicit path
+        auth_dir / "admin_token",             # Admin token in auth_dir
+        cfg.test_mode,                        # Only controls admin token fallback
+        auth_dir / "server.crt",              # Certificate in auth_dir
+        auth_dir / "server.key"               # Private key in auth_dir
+    )
 
 
 def _read_admin_token(path) -> Optional[str]:
@@ -110,9 +118,9 @@ def create_app(config: ServerConfig) -> FastAPI:
         logging.getLogger('peewee').setLevel(logging.WARNING)
 
         # Resolve paths from policy
-        db_path, admin_token_path, allow_ephemeral = _resolve_paths(config)
-        logger.info("resolved paths: db=%s, admin_token=%s, test_mode=%s",
-                    db_path, admin_token_path, config.test_mode)
+        db_path, admin_token_path, allow_ephemeral, cert_path, key_path = _resolve_paths(config)
+        logger.info("resolved paths: db=%s, admin_token=%s, cert=%s, key=%s, test_mode=%s",
+                    db_path, admin_token_path, cert_path, key_path, config.test_mode)
 
         # Apply DB path before connecting
         try:
@@ -128,9 +136,10 @@ def create_app(config: ServerConfig) -> FastAPI:
         # Admin token resolution
         token = _read_admin_token(admin_token_path)
         if token is None and allow_ephemeral:
-            token = auth_service.generate_admin_token()
-            logger.warning("No admin token file found; generated EPHEMERAL admin token (dev): %s", token)
-            logger.warning("To use a fixed token in dev, create ./admin_token with 0600 perms.")
+            # In test mode, use a consistent admin token for development
+            token = "dev_admin_token_12345"
+            logger.warning("No admin token file found; using CONSISTENT dev admin token: %s", token)
+            logger.warning("To use a different token in dev, create ./admin_token with 0600 perms.")
         if token is None and not allow_ephemeral:
             db_manager.close()
             raise RuntimeError(
@@ -447,13 +456,58 @@ def create_app(config: ServerConfig) -> FastAPI:
 
 # ---------------- Entrypoint ----------------
 
+def _get_ssl_context(config: ServerConfig, cert_path, key_path):
+    """Create SSL context for HTTPS if TLS is enabled and certificates exist"""
+    from pathlib import Path
+    import ssl
+    
+    if not config.use_tls:
+        return None
+    
+    # Use resolved auth_dir paths for certificates
+    cert_file = str(cert_path)
+    key_file = str(key_path)
+    
+    # Check if certificate files exist
+    if not Path(cert_file).exists() or not Path(key_file).exists():
+        logger.warning("TLS enabled but certificate files not found: cert=%s, key=%s", cert_file, key_file)
+        logger.warning("Server will start without TLS. Generate certificates or set use_tls=false")
+        return None
+    
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_context.load_cert_chain(cert_file, key_file)
+    logger.info("TLS enabled with cert=%s, key=%s", cert_file, key_file)
+    return ssl_context
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="dcmon server")
     parser.add_argument("-c", "--config", help="Path to YAML config", default="config.yaml")
     args = parser.parse_args()
 
     config = load_config_from(args.config)
+    
+    # Resolve certificate paths for SSL context
+    _, _, _, cert_path, key_path = _resolve_paths(config)
+    ssl_context = _get_ssl_context(config, cert_path, key_path)
+    
     app = create_app(config)
 
     import uvicorn
-    uvicorn.run(app, host=config.host, port=config.port, reload=False, access_log=False)
+    
+    # Prepare uvicorn kwargs
+    uvicorn_kwargs = {
+        "host": config.host,
+        "port": config.port, 
+        "reload": False,
+        "access_log": False
+    }
+    
+    # Add SSL parameters if TLS is enabled
+    if ssl_context:
+        uvicorn_kwargs.update({
+            "ssl_keyfile": str(key_path),
+            "ssl_certfile": str(cert_path)
+        })
+    
+    uvicorn.run(app, **uvicorn_kwargs)

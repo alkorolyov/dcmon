@@ -129,24 +129,60 @@ install_files() {
 host: "0.0.0.0"
 port: 8000
 
-# Database
-database_path: "/var/lib/dcmon/dcmon.db"
-
-# Authentication  
-admin_token_file: "/etc/dcmon-server/admin_token"
-
 # Logging
 log_level: "INFO"  # INFO or DEBUG
 
-# Data retention (important for disk space)
+# Data retention (important for disk space)  
 metrics_days: 30        # Keep metrics for 30 days
-cleanup_interval: 3600  # Cleanup every hour (seconds)
 
 # Test mode (use test admin token if no file found)
 test_mode: false
+
+# HTTPS/TLS configuration
+use_tls: true           # Enable HTTPS by default
+cert_file: null         # Use default path: /etc/dcmon-server/server.crt
+key_file: null          # Use default path: /etc/dcmon-server/server.key
 EOF
         print_success "Created main config.yaml"
     fi
+}
+
+generate_certificates() {
+    print_step "Generating HTTPS certificates..."
+    
+    local cert_file="/etc/dcmon-server/server.crt"
+    local key_file="/etc/dcmon-server/server.key"
+    
+    # Check if certificates already exist
+    if [[ -f "$cert_file" && -f "$key_file" ]]; then
+        print_success "Certificates already exist"
+        return 0
+    fi
+    
+    # Get server IP for certificate
+    local server_ip=$(hostname -I | awk '{print $1}')
+    if [[ -z "$server_ip" ]]; then
+        server_ip="127.0.0.1"
+        print_warning "Could not detect server IP, using localhost"
+    fi
+    
+    # Generate self-signed certificate with server IP in SAN
+    if openssl req -x509 -newkey rsa:4096 -keyout "$key_file" -out "$cert_file" \
+        -days 365 -nodes -subj "/CN=dcmon-server" \
+        -addext "subjectAltName=IP:$server_ip,IP:127.0.0.1,DNS:localhost" >/dev/null 2>&1; then
+        
+        # Set proper permissions
+        chmod 600 "$key_file"
+        chmod 644 "$cert_file"
+        chown dcmon-server:dcmon-server "$key_file" "$cert_file"
+        
+        print_success "Generated HTTPS certificates for IP: $server_ip"
+    else
+        print_warning "Failed to generate certificates - HTTPS will be disabled"
+        return 0  # Don't fail installation, just continue without HTTPS
+    fi
+    
+    return 0
 }
 
 generate_admin_key() {
@@ -278,8 +314,8 @@ enable_service() {
             
             echo
             print_step "Server should be available at:"
-            echo "  http://localhost:8000"
-            echo "  http://localhost:8000/docs (API documentation)"
+            echo "  https://localhost:8000"
+            echo "  https://localhost:8000/docs (API documentation)"
         else
             print_error "Failed to start service"
             return 1
@@ -304,8 +340,9 @@ main() {
     create_user || exit 1
     install_files || exit 1
     create_virtual_environment || exit 1
-    create_systemd_service || exit 1
+    generate_certificates || exit 1
     generate_admin_key || exit 1
+    create_systemd_service || exit 1
     enable_service || exit 1
     
     echo
@@ -318,10 +355,10 @@ main() {
     echo "  sudo journalctl -u dcmon-server -f    # Follow logs"
     echo
     echo "Server endpoints:"
-    echo "  http://localhost:8000                 # Server info"
-    echo "  http://localhost:8000/health          # Health check"
-    echo "  http://localhost:8000/docs            # API documentation"
-    echo "  http://localhost:8000/api/clients     # List clients"
+    echo "  https://localhost:8000                # Server info"
+    echo "  https://localhost:8000/health         # Health check"
+    echo "  https://localhost:8000/docs           # API documentation"
+    echo "  https://localhost:8000/api/clients    # List clients"
 }
 
 main "$@"

@@ -601,3 +601,124 @@ The dcmon system has evolved into a **production-grade monitoring solution** wit
 - **Secure by Default**: Zero public endpoints, cryptographic authentication
 - **Ops-Friendly**: Smart state detection and self-healing registration
 - **Developer-Ready**: Comprehensive test suite and clean architecture
+
+## V2.2 Advanced Metrics System & Availability Management (January 2025)
+
+### ✅ **BMC Fan Control Integration**
+- **IPMI Fan Metrics**: Added BMCFanExporter for Supermicro motherboard fan monitoring
+- **Hardware Detection**: Integrated existing hardware detection from client startup
+- **Fan Controller Singleton**: Optimized FanController instantiation (once per exporter)
+- **Root Privilege Checking**: Added IPMI availability validation for both BMC and sensors
+
+### ✅ **Comprehensive Availability System**
+- **Base Class Pattern**: Added `is_available()` method to MetricsExporter base class
+- **Hardware-Specific Checks**: 
+  - BMCFanExporter: Supermicro hardware + IPMI access
+  - IpmiExporter: Root privileges + IPMI device access  
+  - NvmeExporter: Root privileges + nvme-cli availability
+- **Single Startup Check**: Availability determined once at initialization, not every collection cycle
+- **Clean Logging**: Clear availability status logged for each exporter at startup
+
+### ✅ **Hardware Data Flow Optimization**
+- **Eliminated Duplicate Detection**: Removed duplicate motherboard detection from fans.py
+- **Centralized Hardware Info**: Hardware data flows from client.py → MetricsCollector → exporters
+- **Shared Utility Functions**: Created `is_supermicro_compatible()` and `is_ipmi_available()`
+- **Consistent Naming**: Used `hw_info`, `mdb_name`, `fan_ctrl` throughout codebase
+
+### ✅ **Modern Configuration Architecture**
+- **YAML Configuration**: Added full YAML config support with `--config` argument  
+- **Config-First Pattern**: Standard config file → CLI override precedence
+- **MetricsCollector Singleton**: Exporters initialized once with hardware data
+- **No Legacy Compatibility**: Clean dev-mode implementation without backward compatibility
+
+### ✅ **Python Compatibility Fixes**
+- **Typing Compatibility**: Fixed `tuple[...]` → `Tuple[...]` for Python 3.8+ support
+- **Cryptography Backend**: Added `backend=default_backend()` for all cryptography calls
+- **Version Agnostic**: Single codebase works across Python 3.8-3.12+ and cryptography library versions
+
+**Technical Implementation:**
+```python
+class MetricsExporter(ABC):
+    def __init__(self, name: str):
+        self.available = self.is_available()  # Single check at startup
+        if self.available:
+            self.logger.debug(f"{self.name} metrics enabled")
+        else:
+            self.logger.info(f"{self.name} metrics disabled - not available")
+    
+    def is_available(self) -> bool:
+        return True  # Override in subclasses
+    
+    async def collect(self) -> List[MetricPoint]:
+        if not self.available:
+            return []
+        # Subclass implementation
+
+class BMCFanExporter(MetricsExporter):
+    def __init__(self, hw_info: Dict = None):
+        self.hw_info = hw_info or {}
+        self.fan_ctrl = FanController()  # Singleton instance
+        super().__init__("bmc_fan")
+    
+    def is_available(self) -> bool:
+        mdb_name = self.hw_info.get("mdb_name", "")
+        return is_supermicro_compatible(mdb_name) and is_ipmi_available()
+```
+
+### ✅ **Performance & Logging Improvements**
+- **No Repeated Hardware Detection**: Eliminated startup log spam from repeated detection
+- **Efficient Collection**: Unavailable exporters return immediately without IPMI calls
+- **Root Privilege Awareness**: NVMe SMART data only collected when running as root
+- **Clean Error Handling**: Graceful degradation on non-compatible hardware
+
+### ✅ **Configuration Management**
+- **Field Name Mapping**: Fixed config.yaml field names to match ClientConfig dataclass
+- **Exporters Configuration**: Added exporters section support in YAML config
+- **Clean Config Loading**: Removed legacy field mapping - config file must use correct names
+- **Development Focus**: Zero backward compatibility for clean codebase
+
+**Updated Configuration:**
+```yaml
+# client/config.yaml
+server: "http://localhost:8000"    # not server_url
+auth_dir: "/etc/dcmon"             # not auth_config_dir
+interval: 30                       # not collection_interval
+exporters:
+  os: true
+  ipmi: true
+  apt: true
+  nvme: true
+  nvsmi: true
+  bmc_fan: true
+log_level: "INFO"
+```
+
+## V2.2 Technical Achievements
+
+### ✅ **Advanced Hardware Integration**
+- **BMC Fan Metrics**: `bmc_fan_mode`, `bmc_fan_zone_speed{zone="0|1"}`
+- **Intelligent Availability**: Hardware compatibility + privilege checking
+- **Supermicro Series Support**: X9/X10/X11/X12/H11/H12 motherboard validation
+- **IPMI Command Integration**: Raw IPMI commands for fan control and monitoring
+
+### ✅ **Clean Architecture Patterns**
+- **Single Responsibility**: Hardware detection in client, availability in exporters, IPMI ops in fans
+- **Data Flow Optimization**: Hardware info passed down instead of re-detected
+- **Consistent Patterns**: Same availability checking across all privileged exporters
+- **No Code Duplication**: Shared utility functions for common checks
+
+### ✅ **Developer Experience**
+- **Clear Logging**: Single availability message per exporter at startup
+- **Fast Feedback**: Immediate availability status on system incompatibility
+- **Cross-Version Support**: Works across Python and library versions without conditionals
+- **Modern Config**: Standard YAML + CLI override pattern
+
+## System Status: V2.2 Complete
+
+The dcmon system now features **intelligent hardware compatibility detection**, **advanced BMC fan control integration**, and **clean configuration management**. The V2.2 system provides **enterprise-grade hardware monitoring** with **automatic capability detection** and **zero repeated detection overhead**.
+
+**Key V2.2 Benefits:**
+- **Smart Hardware Detection**: Automatic compatibility checking eliminates configuration guesswork
+- **Performance Optimized**: Single startup checks, no repeated hardware detection calls
+- **IPMI Integration**: Full BMC fan control with Supermicro motherboard support
+- **Clean Architecture**: Modern patterns with shared utilities and consistent naming
