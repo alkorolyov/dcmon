@@ -1,5 +1,5 @@
 server: "https://localhost:8000"
-auth_dir: "/etc/dcmon"
+auth_dir: "."
 interval: 30
 exporters:
   os: true

@@ -456,6 +456,69 @@ def create_app(config: ServerConfig) -> FastAPI:
 
 # ---------------- Entrypoint ----------------
 
+def _detect_external_ip() -> str:
+    """Detect current machine's external IP address"""
+    import subprocess
+    import socket
+    
+    try:
+        # Try to get IP from hostname -I (most reliable for server IPs)
+        result = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and result.stdout.strip():
+            # Get first IP from the output
+            ip = result.stdout.strip().split()[0]
+            if ip and ip != '127.0.0.1':
+                return ip
+    except Exception:
+        pass
+    
+    try:
+        # Fallback: connect to external host to determine our IP
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        pass
+    
+    return "127.0.0.1"
+
+
+def _generate_test_certificates(cert_path, key_path) -> bool:
+    """Generate self-signed certificates for test mode"""
+    import subprocess
+    
+    try:
+        external_ip = _detect_external_ip()
+        logger.info(f"Auto-generating test certificates for IP: {external_ip}")
+        
+        # Generate certificate with both external IP and localhost
+        cmd = [
+            'openssl', 'req', '-x509', '-newkey', 'rsa:2048',
+            '-keyout', str(key_path), '-out', str(cert_path),
+            '-days', '365', '-nodes', '-subj', '/CN=dcmon-server',
+            '-addext', f'subjectAltName=IP:{external_ip},IP:127.0.0.1,DNS:localhost'
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            logger.error(f"Certificate generation failed: {result.stderr}")
+            return False
+        
+        # Set proper permissions
+        try:
+            key_path.chmod(0o600)
+            cert_path.chmod(0o644)
+        except Exception as e:
+            logger.warning(f"Failed to set certificate permissions: {e}")
+        
+        logger.info(f"Generated test certificates: cert={cert_path}, key={key_path}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Certificate generation error: {e}")
+        return False
+
+
 def _get_ssl_context(config: ServerConfig, cert_path, key_path):
     """Create SSL context for HTTPS if TLS is enabled and certificates exist"""
     from pathlib import Path
@@ -470,9 +533,17 @@ def _get_ssl_context(config: ServerConfig, cert_path, key_path):
     
     # Check if certificate files exist
     if not Path(cert_file).exists() or not Path(key_file).exists():
-        logger.warning("TLS enabled but certificate files not found: cert=%s, key=%s", cert_file, key_file)
-        logger.warning("Server will start without TLS. Generate certificates or set use_tls=false")
-        return None
+        if config.test_mode:
+            # Auto-generate certificates in test mode
+            logger.info("Test mode: auto-generating HTTPS certificates")
+            if not _generate_test_certificates(cert_path, key_path):
+                logger.warning("Failed to generate test certificates. Server will start without TLS.")
+                return None
+        else:
+            # Production mode: require existing certificates
+            logger.warning("TLS enabled but certificate files not found: cert=%s, key=%s", cert_file, key_file)
+            logger.warning("Server will start without TLS. Generate certificates or set use_tls=false")
+            return None
     
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ssl_context.load_cert_chain(cert_file, key_file)
