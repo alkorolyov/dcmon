@@ -59,6 +59,18 @@ class ClientConfig:
     log_level: str = "INFO"
     once: bool = False
     registration: bool = False
+    exporters: Dict[str, bool] = None
+    
+    def __post_init__(self):
+        if self.exporters is None:
+            self.exporters = {
+                "os": True,
+                "ipmi": True, 
+                "apt": True,
+                "nvme": True,
+                "nvsmi": True,
+                "bmc_fan": True
+            }
     
     @classmethod
     def from_file(cls, config_path: Path) -> "ClientConfig":
