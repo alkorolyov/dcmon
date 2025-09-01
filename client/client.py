@@ -28,7 +28,7 @@ import socket
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -168,7 +168,7 @@ def detect_motherboard() -> Optional[str]:
     except Exception:
         return None
 
-def detect_cpu() -> tuple[Optional[str], Optional[int]]:
+def detect_cpu() -> Tuple[Optional[str], Optional[int]]:
     """Detect CPU name and core count from /proc/cpuinfo."""
     try:
         cpu_name = None
@@ -198,7 +198,7 @@ def detect_memory() -> Optional[int]:
     except Exception:
         return None
 
-def detect_gpu() -> tuple[Optional[str], Optional[int]]:
+def detect_gpu() -> Tuple[Optional[str], Optional[int]]:
     """Detect primary GPU name and count."""
     try:
         # Try nvidia-smi first
