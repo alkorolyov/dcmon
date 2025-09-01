@@ -28,6 +28,7 @@ try:
     from cryptography.hazmat.primitives import serialization, hashes
     from cryptography.hazmat.primitives.asymmetric import rsa, padding
     from cryptography.hazmat.primitives.serialization import load_pem_private_key
+    from cryptography.hazmat.backends import default_backend
     CRYPTO_AVAILABLE = True
 except ImportError:
     CRYPTO_AVAILABLE = False
@@ -61,7 +62,11 @@ class ClientAuth:
         try:
             self.auth_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
 
-            private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            private_key = rsa.generate_private_key(
+                public_exponent=65537, 
+                key_size=2048, 
+                backend=default_backend()
+            )
             public_key = private_key.public_key()
 
             # Serialize
