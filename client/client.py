@@ -26,23 +26,66 @@ import logging
 import os
 import socket
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+import yaml
+
 # Local auth helper (keys + registration request)
 try:
     # when run as module
     from .auth import ClientAuth, setup_client_auth
-    from .exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter
+    from .exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter
 except ImportError:
     # when run as script from project root
     from auth import ClientAuth, setup_client_auth
-    from exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter
+    from exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter
 
 
 LOG = logging.getLogger("dcmon.client")
+
+
+# ---------------- Configuration ----------------
+
+@dataclass
+class ClientConfig:
+    """Client configuration with defaults"""
+    auth_dir: str = "/etc/dcmon"
+    server: str = "http://127.0.0.1:8000"
+    interval: int = 30
+    log_level: str = "INFO"
+    once: bool = False
+    registration: bool = False
+    
+    @classmethod
+    def from_file(cls, config_path: Path) -> "ClientConfig":
+        """Load configuration from YAML file"""
+        if not config_path.exists():
+            LOG.debug(f"Config file not found: {config_path}, using defaults")
+            return cls()
+        
+        try:
+            with open(config_path, "r") as f:
+                data = yaml.safe_load(f) or {}
+            LOG.debug(f"Loaded config from {config_path}: {data}")
+            return cls(**data)
+        except Exception as e:
+            LOG.warning(f"Failed to load config from {config_path}: {e}, using defaults")
+            return cls()
+    
+    def override_with_args(self, args: argparse.Namespace) -> "ClientConfig":
+        """Override config with command line arguments if provided"""
+        # Direct override - CLI args take precedence
+        self.auth_dir = args.auth_dir
+        self.server = args.server  
+        self.interval = args.interval
+        self.log_level = args.log_level
+        self.once = args.once
+        self.registration = args.registration
+        return self
 
 
 # ---------------- HTTP helpers ----------------
@@ -269,46 +312,56 @@ def _now() -> int:
     return int(time.time())
 
 
-async def collect_metrics(hostname: str) -> List[Dict[str, Any]]:
-    """
-    Collect metrics from all available exporters.
-    Returns metrics in server's expected schema format.
-    """
-    all_metrics = []
+class MetricsCollector:
+    """Manages metrics collection from all exporters with singleton pattern"""
     
-    # Initialize all exporters
-    exporters = [
-        OSMetricsExporter(),
-        IpmiExporter(),
-        AptExporter(), 
-        NvmeExporter(),
-        NvsmiExporter(),
-    ]
+    def __init__(self, hw_info: Dict = None):
+        """Initialize all exporters once during startup"""
+        self.hw_info = hw_info or {}
+        LOG.info("Initializing metrics exporters...")
+        self.exporters = [
+            OSMetricsExporter(),
+            IpmiExporter(),
+            AptExporter(), 
+            NvmeExporter(),
+            NvsmiExporter(),
+            BMCFanExporter(hw_info=self.hw_info),
+        ]
+        LOG.info(f"Initialized {len(self.exporters)} metrics exporters")
     
-    # Collect from each exporter
-    for exporter in exporters:
-        try:
-            exporter_metrics = await exporter.collect()
-            # Convert MetricPoint objects to dict format expected by server
-            for metric in exporter_metrics:
-                # Determine value type from MetricPoint's integer classification
-                value_type = "int" if isinstance(metric.value, int) else "float"
-                
-                metric_dict = {
-                    "timestamp": metric.timestamp,
-                    "metric_name": metric.name,
-                    "labels": metric.labels,
-                    "value_type": value_type,
-                    "value": float(metric.value)  # Always send as float, server will convert if needed
-                }
+    async def collect_metrics(self) -> List[Dict[str, Any]]:
+        """
+        Collect metrics from all initialized exporters.
+        Returns metrics in server's expected schema format.
+        """
+        all_metrics = []
+        
+        # Collect from each pre-initialized exporter
+        for exporter in self.exporters:
+            try:
+                exporter_metrics = await exporter.collect()
+                # Convert MetricPoint objects to dict format expected by server
+                for metric in exporter_metrics:
+                    # Determine value type from MetricPoint's integer classification
+                    value_type = "int" if isinstance(metric.value, int) else "float"
                     
-                all_metrics.append(metric_dict)
-                
-        except Exception as e:
-            LOG.warning(f"Failed to collect metrics from {exporter.__class__.__name__}: {e}")
-            continue
-    
-    return all_metrics
+                    metric_dict = {
+                        "timestamp": metric.timestamp,
+                        "metric_name": metric.name,
+                        "labels": metric.labels,
+                        "value_type": value_type,
+                        "value": float(metric.value)  # Always send as float, server will convert if needed
+                    }
+                        
+                    all_metrics.append(metric_dict)
+                    
+            except Exception as e:
+                LOG.warning(f"Failed to collect metrics from {exporter.__class__.__name__}: {e}")
+                continue
+        
+        return all_metrics
+
+
 
 
 def send_metrics(server_base: str, client_token: str, metrics: List[Dict[str, Any]], hw_hash: Optional[str] = None) -> Dict[str, Any]:
@@ -385,14 +438,15 @@ def register_client_interactively(auth: ClientAuth, server_base: str, hostname: 
 
 # ---------------- Main ----------------
 
-async def run_client(auth_dir: Path, server: str, interval: int, once: bool, registration_only: bool) -> None:
+async def run_client(config: ClientConfig) -> None:
     # Configure auth helper (keys + token)
+    auth_dir = Path(config.auth_dir)
     auth = setup_client_auth(auth_dir)
     if not auth:
         raise SystemExit(1)
 
     # Registration-only mode: print request JSON to stdout and exit
-    if registration_only:
+    if config.registration:
         req = auth.create_registration_request(socket.gethostname())
         if not req:
             raise SystemExit("ERROR: failed to create registration request.")
@@ -404,24 +458,27 @@ async def run_client(auth_dir: Path, server: str, interval: int, once: bool, reg
     if not token:
         hostname = socket.gethostname()
         # Interactive registration with admin token prompt
-        token = register_client_interactively(auth, server, hostname)
+        token = register_client_interactively(auth, config.server, hostname)
         # Save the client token for future use
         if not auth.save_client_token(token):
             raise SystemExit("ERROR: Failed to save client token after registration.")
         LOG.info("Client token saved successfully")
 
     # Generate hardware hash once for metrics sending
-    current_hardware = detect_hardware()
-    hw_hash = current_hardware.get("hw_hash")
+    hw_info = detect_hardware()
+    hw_hash = hw_info.get("hw_hash")
+    
+    # Initialize metrics collector once (singleton exporters) with hardware info
+    metrics_collector = MetricsCollector(hw_info=hw_info)
     
     # Metrics loop
-    LOG.info("client starting; posting metrics to %s every %ss", server, interval)
+    LOG.info("client starting; posting metrics to %s every %ss", config.server, config.interval)
     while True:
         try:
-            batch = await collect_metrics(socket.gethostname())
+            batch = await metrics_collector.collect_metrics()
             if not batch:
                 LOG.warning("no metrics collected")
-            res = send_metrics(server, token, batch, hw_hash)
+            res = send_metrics(config.server, token, batch, hw_hash)
             LOG.debug("sent metrics: %s", res)
         except HTTPError as e:
             try:
@@ -434,13 +491,15 @@ async def run_client(auth_dir: Path, server: str, interval: int, once: bool, reg
         except Exception as e:
             LOG.exception("unexpected error during metrics send: %s", e)
 
-        if once:
+        if config.once:
             break
-        await asyncio.sleep(max(1, interval))
+        await asyncio.sleep(max(1, config.interval))
 
 
 def main():
     parser = argparse.ArgumentParser(description="dcmon client")
+    parser.add_argument("--config", "-c", type=Path, default=Path("config.yaml"),
+                        help="YAML configuration file (default: config.yaml)")
     parser.add_argument("--auth-dir", default="/etc/dcmon", dest="auth_dir",
                         help="directory for client credentials (private key, public key, client token)")
     parser.add_argument("--server", default="http://127.0.0.1:8000",
@@ -455,16 +514,15 @@ def main():
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="logging level")
     args = parser.parse_args()
 
-    logging.basicConfig(level=getattr(logging, args.log_level))
+    # Load config: YAML first, then CLI overrides
+    config = ClientConfig.from_file(args.config).override_with_args(args)
+    
+    # Configure logging
+    logging.basicConfig(level=getattr(logging, config.log_level))
+    LOG.info(f"dcmon client starting with config: server={config.server}, interval={config.interval}s")
 
     try:
-        asyncio.run(run_client(
-            auth_dir=Path(args.auth_dir),
-            server=args.server,
-            interval=args.interval,
-            once=args.once,
-            registration_only=args.registration,
-        ))
+        asyncio.run(run_client(config))
     except KeyboardInterrupt:
         print("\nInterrupted. Bye!")
 

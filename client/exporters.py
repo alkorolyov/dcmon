@@ -8,6 +8,74 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Optional
 
+try:
+    from .fans import FanController, BMCFanMode
+except ImportError:
+    from fans import FanController, BMCFanMode
+
+
+def is_supermicro_compatible(mdb_name: str) -> bool:
+    """Check if motherboard supports BMC fan control based on hardware detection"""
+    if not mdb_name:
+        return False
+    
+    mdb_upper = mdb_name.upper()
+    if "SUPERMICRO" not in mdb_upper:
+        return False
+    
+    # Check for supported series (X9, X10, X11, X12, H11, H12)
+    supported_series = ['X9', 'X10', 'X11', 'X12', 'H11', 'H12']
+    return any(series in mdb_upper for series in supported_series)
+
+
+def is_nvme_available() -> bool:
+    """Check if nvme-cli is available and has device access (requires root for SMART data)"""
+    import os
+    import subprocess
+    
+    # Check if running as root (required for SMART data access)
+    if os.geteuid() != 0:
+        return False
+    
+    # Test if nvme command exists and works
+    try:
+        result = subprocess.run(
+            ["nvme", "list", "-o", "json"],
+            capture_output=True,
+            timeout=5
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def is_ipmi_available() -> bool:
+    """
+    Check if IPMI is available (requires root or device access).
+    Returns True if IPMI tools and devices are accessible.
+    """
+    import os
+    import subprocess
+    from pathlib import Path
+    
+    # Check if we have root privileges
+    if os.geteuid() != 0:
+        # Non-root users might still have access via device permissions
+        ipmi_devices = ["/dev/ipmi0", "/dev/ipmi/0", "/dev/ipmidev/0"]
+        if not any(Path(dev).exists() for dev in ipmi_devices):
+            return False
+    
+    # Test if ipmitool command works
+    try:
+        result = subprocess.run(
+            ["ipmitool", "mc", "info"], 
+            capture_output=True, 
+            timeout=5
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
 
 @dataclass
 class MetricPoint:
@@ -68,13 +136,26 @@ class MetricsExporter(ABC):
     def __init__(self, name: str, logger: logging.Logger = logging.getLogger(__name__)):
         self.name = name
         self.enabled = True
+        self.available = self.is_available()  # Check availability once at startup
         self.last_collection = 0
         self.logger = logger
-
+        
+        # Log availability status
+        if self.available:
+            self.logger.debug(f"{self.name} metrics enabled")
+        else:
+            self.logger.info(f"{self.name} metrics disabled - not available")
+    
+    def is_available(self) -> bool:
+        """Check if this exporter is available. Override in subclasses for specific checks."""
+        return True  # Default: always available
+    
     @abstractmethod
     async def collect(self) -> List[MetricPoint]:
         """Collect metrics and return list of MetricPoint objects"""
-        pass
+        if not self.available:
+            return []
+        # Subclasses implement actual collection logic here
 
     async def safe_collect(self) -> List[MetricPoint]:
         """Safely collect metrics with error handling"""
@@ -443,10 +524,17 @@ class IpmiExporter(MetricsExporter):
     """
 
     def __init__(self, ipmi_bin: str = "ipmitool"):
-        super().__init__("ipmi")
         self.ipmi_bin = ipmi_bin  # set to "ipmitools" if that's your binary name
+        super().__init__("ipmi")
+    
+    def is_available(self) -> bool:
+        """Check if IPMI is available (device access + privileges)"""
+        return is_ipmi_available()
 
     async def collect(self) -> List[MetricPoint]:
+        """Collect IPMI sensor metrics"""
+        if not self.available:
+            return []
         rows = await self._read_ipmi_sensor_table()
         metrics: List[MetricPoint] = []
 
@@ -600,8 +688,15 @@ class NvmeExporter(MetricsExporter):
 
     def __init__(self):
         super().__init__("nvme")
+    
+    def is_available(self) -> bool:
+        """Check if nvme-cli is available (requires root for SMART data access)"""
+        return is_nvme_available()
 
     async def collect(self) -> List[MetricPoint]:
+        if not self.available:
+            return []
+            
         devices = await self._list_nvme_devices()
         if not devices:
             return []
@@ -794,3 +889,56 @@ class NvsmiExporter(MetricsExporter):
         return metrics
 
 
+class BMCFanExporter(MetricsExporter):
+    """Exports BMC fan control metrics via IPMI"""
+    
+    def __init__(self, hw_info: Dict = None):
+        self.hw_info = hw_info or {}
+        self.fan_ctrl = FanController()  # Create once and reuse
+        super().__init__("bmc_fan")
+    
+    def is_available(self) -> bool:
+        """Check if BMC fan control is available (Supermicro hardware + IPMI access)"""
+        mdb_name = self.hw_info.get("mdb_name", "")
+        return is_supermicro_compatible(mdb_name) and is_ipmi_available()
+    
+    async def collect(self) -> List[MetricPoint]:
+        """Collect BMC fan metrics"""
+        if not self.available:
+            return []
+            
+        metrics = []
+        
+        try:
+            # Use cached fan controller instance
+            status = await self.fan_ctrl.get_fan_status()
+            
+            # BMC Fan Mode metric
+            if status.get('bmc_mode_value') is not None:
+                metrics.append(MetricPoint(
+                    "bmc_fan_mode", 
+                    status['bmc_mode_value']
+                ))
+            
+            # Fan zone speed metrics
+            zone_0_speed = status.get('zone_0_speed')
+            if zone_0_speed is not None:
+                metrics.append(MetricPoint(
+                    "bmc_fan_zone_speed",
+                    zone_0_speed,
+                    {"zone": "0"}
+                ))
+            
+            zone_1_speed = status.get('zone_1_speed') 
+            if zone_1_speed is not None:
+                metrics.append(MetricPoint(
+                    "bmc_fan_zone_speed", 
+                    zone_1_speed,
+                    {"zone": "1"}
+                ))
+                
+        except Exception as e:
+            # Don't break metrics collection if IPMI fails
+            self.logger.debug(f"BMC fan metrics unavailable: {e}")
+            
+        return metrics
