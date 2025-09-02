@@ -793,6 +793,28 @@ openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
 - **Auto-Trust Verification**: Clients connect without certificate validation errors or warnings
 - **Development Testing**: Seamless HTTPS testing with consistent admin token workflow
 
+### ✅ **Development-Friendly Certificate Auto-Generation**
+- **Test Mode Auto-Generation**: Server automatically generates HTTPS certificates when missing in test mode
+- **IP Detection**: Certificates include detected external IP address in Subject Alternative Name
+- **PyCharm/IDE Compatibility**: Works regardless of working directory or development environment
+- **Security Boundaries**: Auto-generation only in test mode, production requires explicit certificates
+- **Zero Manual Steps**: Eliminates need for manual openssl commands during development
+
+**Auto-Generation Implementation:**
+```python
+def _generate_test_certificates(cert_path, key_path) -> bool:
+    external_ip = _detect_external_ip()  # Detects actual machine IP
+    # Generates certificate with IP:external_ip,IP:127.0.0.1,DNS:localhost
+    # Only runs when test_mode=true and certificates missing
+```
+
+**Development Workflow:**
+```bash
+# Just run server - certificates auto-generated with correct IP
+python3 server/main.py -c server/config_test.yaml
+# Result: INFO: Uvicorn running on https://0.0.0.0:8000
+```
+
 ## V2.3 Technical Achievements
 
 ### ✅ **Defense in Depth Security**

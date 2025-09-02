@@ -27,17 +27,22 @@ from secrets import compare_digest
 from typing import Any, Dict, List, Optional
 
 import yaml
-from fastapi import FastAPI, Depends, HTTPException, status, Query, Path
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Path, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, model_validator
 
 # Support running as script or as package
 try:
     from .models import db_manager, Client, MetricSeries, MetricPointsInt, MetricPointsFloat, Command
     from .auth import AuthService
+    from .dashboard import DashboardController
 except ImportError:
     from models import db_manager, Client, MetricSeries, MetricPointsInt, MetricPointsFloat, Command
     from auth import AuthService
+    from dashboard import DashboardController
 
 logger = logging.getLogger("dcmon.server")
 
@@ -98,10 +103,11 @@ def create_app(config: ServerConfig) -> FastAPI:
     """
     Build the FastAPI app using the provided config.
     """
-    security = HTTPBearer()
+    security = HTTPBearer(auto_error=False)
     auth_service = AuthService()
     ADMIN_TOKEN: Optional[str] = None
     cleanup_task: Optional[asyncio.Task] = None
+    
     CLEANUP_INTERVAL_SECONDS = 3600  # hourly
 
     @asynccontextmanager
@@ -183,10 +189,35 @@ def create_app(config: ServerConfig) -> FastAPI:
 
     # ------------- Auth dependencies -------------
 
-    def require_admin_auth(creds: HTTPAuthorizationCredentials = Depends(security)) -> None:
-        if not ADMIN_TOKEN or not compare_digest(creds.credentials, ADMIN_TOKEN):
-            logger.warning(f"Admin authentication failed from request")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid admin token")
+    def require_admin_auth(request: Request) -> None:
+        """
+        Simple Basic Auth for both test and production modes.
+        In test mode, use any username + dev_admin_token_12345 as password.
+        In production mode, use any username + real admin token as password.
+        """
+        auth_header = request.headers.get("authorization", "")
+        
+        if auth_header.startswith("Basic "):
+            import base64
+            try:
+                credentials = base64.b64decode(auth_header[6:]).decode('utf-8')
+                if ":" in credentials:
+                    username, password = credentials.split(":", 1)
+                    if ADMIN_TOKEN and compare_digest(password, ADMIN_TOKEN):
+                        logger.debug("Admin authenticated via Basic Auth")
+                        return
+            except Exception:
+                pass
+        
+        # Authentication failed - prompt for Basic Auth
+        realm_msg = "dcmon Admin (test mode: use any username + dev_admin_token_12345)" if config.test_mode else "dcmon Admin"
+        logger.warning("Admin authentication failed")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": f"Basic realm=\"{realm_msg}\""}
+        )
+    
 
     def require_client_auth(creds: HTTPAuthorizationCredentials = Depends(security)) -> Client:
         token = creds.credentials
@@ -195,6 +226,7 @@ def create_app(config: ServerConfig) -> FastAPI:
             logger.warning(f"Client authentication failed with token: {token[:8]}...")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid client token")
         return client
+
 
     # ------------- Schemas (pydantic v2) -------------
 
@@ -405,28 +437,61 @@ def create_app(config: ServerConfig) -> FastAPI:
         end: Optional[int] = Query(None),
         limit: int = Query(1000, ge=1, le=10000),
     ):
-        metrics = Metric.get_metrics(
-            client_id=client_id,
-            metric_names=metric_name,
-            start_time=start,
-            end_time=end,
-            limit=limit,
-        )
+        # Build query for metric series
+        series_query = MetricSeries.select()
+        if client_id:
+            series_query = series_query.where(MetricSeries.client == client_id)
+        if metric_name:
+            series_query = series_query.where(MetricSeries.metric_name.in_(metric_name))
+        
+        series_list = list(series_query)
+        if not series_list:
+            return {"metrics": []}
+        
+        series_ids = [s.id for s in series_list]
         out = []
-        for m in metrics:
-            try:
-                labels = json.loads(m.labels) if m.labels else None
-            except Exception:
-                labels = m.labels
+        
+        # Query float points
+        float_query = MetricPointsFloat.select().where(MetricPointsFloat.series.in_(series_ids))
+        if start:
+            float_query = float_query.where(MetricPointsFloat.timestamp >= start)
+        if end:
+            float_query = float_query.where(MetricPointsFloat.timestamp <= end)
+        float_query = float_query.order_by(MetricPointsFloat.timestamp.desc()).limit(limit // 2)
+        
+        for point in float_query:
+            series = next(s for s in series_list if s.id == point.series.id)
             out.append({
-                "client_id": int(m.client.id) if isinstance(m.client, Client) else int(m.client),
-                "timestamp": m.timestamp,
-                "metric_name": m.metric_name,
-                "value_float": m.value_float,
-                "value_int": m.value_int,
-                "labels": labels,
+                "client_id": series.client.id,
+                "timestamp": point.timestamp,
+                "metric_name": series.metric_name,
+                "value_float": point.value,
+                "value_int": None,
+                "labels": json.loads(series.labels) if series.labels else None,
             })
-        return {"metrics": out}
+        
+        # Query int points
+        int_query = MetricPointsInt.select().where(MetricPointsInt.series.in_(series_ids))
+        if start:
+            int_query = int_query.where(MetricPointsInt.timestamp >= start)
+        if end:
+            int_query = int_query.where(MetricPointsInt.timestamp <= end)
+        int_query = int_query.order_by(MetricPointsInt.timestamp.desc()).limit(limit // 2)
+        
+        for point in int_query:
+            series = next(s for s in series_list if s.id == point.series.id)
+            out.append({
+                "client_id": series.client.id,
+                "timestamp": point.timestamp,
+                "metric_name": series.metric_name,
+                "value_float": None,
+                "value_int": point.value,
+                "labels": json.loads(series.labels) if series.labels else None,
+            })
+        
+        # Sort by timestamp descending
+        out.sort(key=lambda x: x["timestamp"], reverse=True)
+        return {"metrics": out[:limit]}
 
     @app.get("/api/stats", dependencies=[Depends(require_admin_auth)])
     def get_stats():
@@ -450,6 +515,144 @@ def create_app(config: ServerConfig) -> FastAPI:
             "hostname": client.hostname,
             "last_seen": client.last_seen
         }
+
+    # ------------- Dashboard Routes & Static Files -------------
+    
+    # Initialize dashboard controller and templates
+    dashboard_controller = DashboardController()
+    templates = Jinja2Templates(directory="templates")
+    
+    # Add template filters for better display
+    def format_datetime(timestamp):
+        if not timestamp:
+            return ""
+        try:
+            return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
+        except:
+            return str(timestamp)
+    
+    def format_time(timestamp):
+        if not timestamp:
+            return ""
+        try:
+            return time.strftime("%H:%M:%S", time.localtime(timestamp))
+        except:
+            return str(timestamp)
+    
+    def format_time_ago(timestamp):
+        if not timestamp:
+            return "Never"
+        try:
+            diff = int(time.time()) - timestamp
+            if diff < 60:
+                return f"{diff}s ago"
+            elif diff < 3600:
+                return f"{diff // 60}m ago"
+            elif diff < 86400:
+                return f"{diff // 3600}h ago"
+            else:
+                return f"{diff // 86400}d ago"
+        except:
+            return "Unknown"
+    
+    # Add template filters and functions
+    def format_bytes(bytes_value):
+        if not bytes_value:
+            return "0 B"
+        try:
+            bytes_val = float(bytes_value)
+            if bytes_val < 1024:
+                return f"{bytes_val:.0f}B"
+            elif bytes_val < 1024**2:
+                return f"{bytes_val/1024:.1f}KB"
+            elif bytes_val < 1024**3:
+                return f"{bytes_val/(1024**2):.1f}MB"
+            else:
+                return f"{bytes_val/(1024**3):.1f}GB"
+        except:
+            return str(bytes_value)
+    
+    def format_uptime_long(seconds):
+        if not seconds:
+            return "Unknown"
+        try:
+            seconds = int(seconds)
+            days = seconds // 86400
+            hours = (seconds % 86400) // 3600
+            minutes = (seconds % 3600) // 60
+            if days > 0:
+                return f"{days} days, {hours} hours"
+            elif hours > 0:
+                return f"{hours} hours, {minutes} minutes"
+            else:
+                return f"{minutes} minutes"
+        except:
+            return "Unknown"
+    
+    def get_metric_status_helper(metric_name, value):
+        """Template helper for getting metric status class"""
+        try:
+            from dashboard.config import get_metric_status
+            return get_metric_status(metric_name, float(value) if value else 0)
+        except:
+            return 'no_data'
+    
+    # Add filters to Jinja2 environment
+    templates.env.filters['format_datetime'] = format_datetime
+    templates.env.filters['format_time'] = format_time
+    templates.env.filters['format_time_ago'] = format_time_ago
+    templates.env.filters['format_bytes'] = format_bytes
+    templates.env.filters['format_uptime_long'] = format_uptime_long
+    templates.env.globals['get_metric_status'] = get_metric_status_helper
+
+    @app.get("/dashboard", response_class=HTMLResponse, dependencies=[Depends(require_admin_auth)])
+    def dashboard_main(request: Request):
+        """Main dashboard page - shows system overview, clients, and metrics."""
+        logger.debug("Rendering main dashboard")
+        
+        try:
+            dashboard_data = dashboard_controller.get_main_dashboard_data()
+            dashboard_data["request"] = request
+            
+            return templates.TemplateResponse("dashboard.html", dashboard_data)
+            
+        except Exception as e:
+            logger.error(f"Dashboard error: {e}")
+            return templates.TemplateResponse("dashboard.html", {
+                "request": request,
+                "page_title": "dcmon Dashboard - Error",
+                "error": str(e),
+                "timestamp": int(time.time()),
+                "clients": [],
+                "system_overview": {},
+                "recent_alerts": [],
+                "charts": {}
+            })
+
+    @app.get("/dashboard/refresh/clients", response_class=HTMLResponse, dependencies=[Depends(require_admin_auth)])
+    def dashboard_refresh_clients(request: Request):
+        """Refresh client status table via htmx."""
+        logger.debug("Refreshing client status")
+        
+        try:
+            clients = dashboard_controller._get_client_status_data()
+            return templates.TemplateResponse("components/clients_table.html", {
+                "request": request,
+                "clients": clients,
+                "timestamp": int(time.time())
+            })
+            
+        except Exception as e:
+            logger.error(f"Client refresh error: {e}")
+            return templates.TemplateResponse("components/clients_table.html", {
+                "request": request,
+                "clients": [],
+                "error": str(e),
+                "timestamp": int(time.time())
+            })
+
+    # Mount static files (CSS, JS, etc.)
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
     return app
 
