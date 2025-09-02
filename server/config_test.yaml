@@ -6,7 +6,7 @@ port: 8000
 log_level: "DEBUG"
 
 # Data retention
-metrics_days: 1
+metrics_days: 7
 
 # File paths - explicit configuration
 auth_dir: "."                    # All security files in current directory
