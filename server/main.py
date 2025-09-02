@@ -493,6 +493,182 @@ def create_app(config: ServerConfig) -> FastAPI:
         out.sort(key=lambda x: x["timestamp"], reverse=True)
         return {"metrics": out[:limit]}
 
+    @app.get("/api/timeseries/{metric_name}")
+    def get_timeseries(
+        metric_name: str,
+        hours: int = Query(24, ge=1, le=168),  # 1 hour to 1 week
+        clients: Optional[List[int]] = Query(None),
+        aggregation: str = Query("max", pattern="^(max|min|avg|sum|raw)$"),
+        admin_auth: bool = Depends(require_admin_auth)  # Uses Basic Auth like dashboard
+    ):
+        """
+        General-purpose timeseries endpoint for dashboard charts.
+        Uses Basic Auth authentication compatible with dashboard.
+        
+        Examples:
+        - /api/timeseries/gpu_temperature?hours=24&aggregation=max
+        - /api/timeseries/cpu_usage_percent?clients=1,2&hours=6&aggregation=avg
+        """
+        try:
+            # Calculate time range
+            end_time = int(time.time())
+            start_time = end_time - (hours * 3600)
+            
+            # Get series for the requested metric
+            series_query = (MetricSeries.select()
+                          .join(Client)
+                          .where(MetricSeries.metric_name == metric_name))
+            
+            if clients:
+                series_query = series_query.where(MetricSeries.client.in_(clients))
+                
+            series_list = list(series_query)
+            if not series_list:
+                return {"data": [[]], "series": [{}], "clients": {}, "metric": metric_name}
+            
+            # Collect all timestamps and organize by client
+            timestamps = set()
+            client_data = {}
+            client_names = {}
+            
+            # Get metric points in time range (check both int and float tables)
+            series_ids = [s.id for s in series_list]
+            
+            # Try int points first
+            int_points = (MetricPointsInt.select()
+                         .where(
+                             (MetricPointsInt.series.in_(series_ids)) &
+                             (MetricPointsInt.timestamp >= start_time) &
+                             (MetricPointsInt.timestamp <= end_time)
+                         )
+                         .order_by(MetricPointsInt.timestamp))
+            
+            # Process int points
+            for point in int_points:
+                series = next(s for s in series_list if s.id == point.series.id)
+                client_id = series.client.id
+                timestamp = point.timestamp
+                value = float(point.value)
+                
+                # Store client name
+                if client_id not in client_names:
+                    client_names[client_id] = series.client.hostname
+                
+                timestamps.add(timestamp)
+                
+                # Initialize client data structure
+                if client_id not in client_data:
+                    client_data[client_id] = {}
+                
+                # Apply aggregation for this timestamp
+                if timestamp not in client_data[client_id]:
+                    client_data[client_id][timestamp] = [value]
+                else:
+                    client_data[client_id][timestamp].append(value)
+            
+            # Try float points 
+            float_points = (MetricPointsFloat.select()
+                           .where(
+                               (MetricPointsFloat.series.in_(series_ids)) &
+                               (MetricPointsFloat.timestamp >= start_time) &
+                               (MetricPointsFloat.timestamp <= end_time)
+                           )
+                           .order_by(MetricPointsFloat.timestamp))
+            
+            # Process float points
+            for point in float_points:
+                series = next(s for s in series_list if s.id == point.series.id)
+                client_id = series.client.id
+                timestamp = point.timestamp
+                value = point.value
+                
+                # Store client name
+                if client_id not in client_names:
+                    client_names[client_id] = series.client.hostname
+                
+                timestamps.add(timestamp)
+                
+                # Initialize client data structure
+                if client_id not in client_data:
+                    client_data[client_id] = {}
+                
+                # Apply aggregation for this timestamp
+                if timestamp not in client_data[client_id]:
+                    client_data[client_id][timestamp] = [value]
+                else:
+                    client_data[client_id][timestamp].append(value)
+            
+            # Apply aggregation function to collected values
+            aggregated_client_data = {}
+            for client_id, time_data in client_data.items():
+                aggregated_client_data[client_id] = {}
+                for timestamp, values in time_data.items():
+                    if aggregation == "max":
+                        aggregated_client_data[client_id][timestamp] = max(values)
+                    elif aggregation == "min":
+                        aggregated_client_data[client_id][timestamp] = min(values)
+                    elif aggregation == "avg":
+                        aggregated_client_data[client_id][timestamp] = sum(values) / len(values)
+                    elif aggregation == "sum":
+                        aggregated_client_data[client_id][timestamp] = sum(values)
+                    else:  # raw - take first value
+                        aggregated_client_data[client_id][timestamp] = values[0]
+            
+            # Convert to uPlot format: [[timestamps], [client1_values], [client2_values], ...]
+            sorted_timestamps = sorted(list(timestamps))
+            uplot_data = [sorted_timestamps]  # x-axis (timestamps)
+            
+            # Build series configuration for uPlot
+            series_config = [{}]  # x-axis config (empty)
+            
+            # Color palette for different clients
+            colors = ["#73bf69", "#f2495c", "#5794f2", "#ff9830", "#9d7bd8", "#70dbed"]
+            color_idx = 0
+            
+            for client_id in sorted(aggregated_client_data.keys()):
+                # Build values array for this client
+                values = []
+                for timestamp in sorted_timestamps:
+                    values.append(aggregated_client_data[client_id].get(timestamp, None))
+                
+                uplot_data.append(values)
+                
+                # Add series configuration
+                series_config.append({
+                    "label": client_names[client_id],
+                    "stroke": colors[color_idx % len(colors)],
+                    "width": 2,
+                    "show": True
+                })
+                color_idx += 1
+            
+            # Determine unit based on metric name
+            unit_map = {
+                "gpu_temperature": "°C",
+                "cpu_temp_celsius": "°C", 
+                "cpu_usage_percent": "%",
+                "memory_usage_percent": "%",
+                "disk_usage_percent": "%",
+                "gpu_power_draw": "W",
+                "gpu_fan_speed": "%",
+                "ipmi_fan_rpm": " RPM"
+            }
+            unit = unit_map.get(metric_name, "")
+            
+            return {
+                "data": uplot_data,
+                "series": series_config,
+                "clients": client_names,
+                "time_range": {"start": start_time, "end": end_time},
+                "metric": metric_name,
+                "aggregation": aggregation,
+                "unit": unit
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting {metric_name} timeseries: {e}")
+            raise HTTPException(status_code=500, detail="Failed to get timeseries data")
+
     @app.get("/api/stats", dependencies=[Depends(require_admin_auth)])
     def get_stats():
         return db_manager.get_stats()

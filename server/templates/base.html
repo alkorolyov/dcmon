@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}dcmon Dashboard{% endblock %}</title>
+    
+    <!-- uPlot.js for time series charts -->
+    <script src="https://unpkg.com/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.30/dist/uPlot.min.css">
+    
+    <!-- htmx for minimal interactivity -->
+    <script src="https://unpkg.com/htmx.org@1.9.8"></script>
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <div class="dashboard-layout">
+        <!-- Main Content -->
+        <main class="dashboard-main">
+            {% block content %}{% endblock %}
+        </main>
+        
+        <!-- Footer -->
+        <footer class="dashboard-footer">
+            <div class="footer-content">
+                <span>dcmon v2.3 - AI-Friendly Dashboard</span>
+                <span>Last updated: <span id="last-update">{{ timestamp | format_time if timestamp else 'Never' }}</span></span>
+            </div>
+        </footer>
+    </div>
+    
+    <!-- Minimal JavaScript -->
+    <script src="/static/js/dashboard.js"></script>
+    
+    <!-- uPlot Time Series Charts -->
+    <script src="/static/js/uplot-charts.js"></script>
+    
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>
