@@ -27,6 +27,8 @@ from secrets import compare_digest
 from typing import Any, Dict, List, Optional
 
 import yaml
+import pandas as pd
+import numpy as np
 from fastapi import FastAPI, Depends, HTTPException, status, Query, Path, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.templating import Jinja2Templates
@@ -526,15 +528,16 @@ def create_app(config: ServerConfig) -> FastAPI:
             if not series_list:
                 return {"data": [[]], "series": [{}], "clients": {}, "metric": metric_name}
             
-            # Collect all timestamps and organize by client
-            timestamps = set()
-            client_data = {}
-            client_names = {}
-            
-            # Get metric points in time range (check both int and float tables)
+            # Use pandas for efficient time series processing
             series_ids = [s.id for s in series_list]
             
-            # Try int points first
+            # Create a mapping of series_id to client info
+            series_to_client = {s.id: (s.client.id, s.client.hostname) for s in series_list}
+            
+            # Collect data from both int and float tables into pandas DataFrame
+            data_records = []
+            
+            # Get int points
             int_points = (MetricPointsInt.select()
                          .where(
                              (MetricPointsInt.series.in_(series_ids)) &
@@ -543,30 +546,16 @@ def create_app(config: ServerConfig) -> FastAPI:
                          )
                          .order_by(MetricPointsInt.timestamp))
             
-            # Process int points
             for point in int_points:
-                series = next(s for s in series_list if s.id == point.series.id)
-                client_id = series.client.id
-                timestamp = point.timestamp
-                value = float(point.value)
-                
-                # Store client name
-                if client_id not in client_names:
-                    client_names[client_id] = series.client.hostname
-                
-                timestamps.add(timestamp)
-                
-                # Initialize client data structure
-                if client_id not in client_data:
-                    client_data[client_id] = {}
-                
-                # Apply aggregation for this timestamp
-                if timestamp not in client_data[client_id]:
-                    client_data[client_id][timestamp] = [value]
-                else:
-                    client_data[client_id][timestamp].append(value)
+                client_id, client_name = series_to_client[point.series.id]
+                data_records.append({
+                    'timestamp': point.timestamp,
+                    'client_id': client_id,
+                    'client_name': client_name,
+                    'value': float(point.value)
+                })
             
-            # Try float points 
+            # Get float points
             float_points = (MetricPointsFloat.select()
                            .where(
                                (MetricPointsFloat.series.in_(series_ids)) &
@@ -575,62 +564,68 @@ def create_app(config: ServerConfig) -> FastAPI:
                            )
                            .order_by(MetricPointsFloat.timestamp))
             
-            # Process float points
             for point in float_points:
-                series = next(s for s in series_list if s.id == point.series.id)
-                client_id = series.client.id
-                timestamp = point.timestamp
-                value = point.value
-                
-                # Store client name
-                if client_id not in client_names:
-                    client_names[client_id] = series.client.hostname
-                
-                timestamps.add(timestamp)
-                
-                # Initialize client data structure
-                if client_id not in client_data:
-                    client_data[client_id] = {}
-                
-                # Apply aggregation for this timestamp
-                if timestamp not in client_data[client_id]:
-                    client_data[client_id][timestamp] = [value]
-                else:
-                    client_data[client_id][timestamp].append(value)
+                client_id, client_name = series_to_client[point.series.id]
+                data_records.append({
+                    'timestamp': point.timestamp,
+                    'client_id': client_id,
+                    'client_name': client_name,
+                    'value': float(point.value)
+                })
             
-            # Apply aggregation function to collected values
-            aggregated_client_data = {}
-            for client_id, time_data in client_data.items():
-                aggregated_client_data[client_id] = {}
-                for timestamp, values in time_data.items():
-                    if aggregation == "max":
-                        aggregated_client_data[client_id][timestamp] = max(values)
-                    elif aggregation == "min":
-                        aggregated_client_data[client_id][timestamp] = min(values)
-                    elif aggregation == "avg":
-                        aggregated_client_data[client_id][timestamp] = sum(values) / len(values)
-                    elif aggregation == "sum":
-                        aggregated_client_data[client_id][timestamp] = sum(values)
-                    else:  # raw - take first value
-                        aggregated_client_data[client_id][timestamp] = values[0]
+            if not data_records:
+                return {"data": [[]], "series": [{}], "clients": {}, "metric": metric_name}
             
-            # Convert to uPlot format: [[timestamps], [client1_values], [client2_values], ...]
-            sorted_timestamps = sorted(list(timestamps))
-            uplot_data = [sorted_timestamps]  # x-axis (timestamps)
+            # Create DataFrame
+            df = pd.DataFrame(data_records)
             
-            # Build series configuration for uPlot
+            # Group by client and timestamp, applying aggregation
+            if aggregation == "max":
+                agg_func = 'max'
+            elif aggregation == "min":
+                agg_func = 'min'
+            elif aggregation == "avg":
+                agg_func = 'mean'
+            elif aggregation == "sum":
+                agg_func = 'sum'
+            else:  # raw - take first value
+                agg_func = 'first'
+            
+            # Group by client_id and timestamp, then aggregate
+            aggregated_df = df.groupby(['client_id', 'client_name', 'timestamp'])['value'].agg(agg_func).reset_index()
+            
+            # Create client names mapping using pandas-native approach
+            client_names = aggregated_df.groupby('client_id')['client_name'].first().to_dict()
+            
+            # Convert to uPlot format - each client gets its own timestamp and value arrays
             series_config = [{}]  # x-axis config (empty)
+            uplot_data = [[]]
+            
+            # Get unique timestamps across all clients for x-axis using pandas
+            all_timestamps = aggregated_df['timestamp'].drop_duplicates().sort_values().tolist()
+            uplot_data[0] = all_timestamps
             
             # Color palette for different clients
             colors = ["#73bf69", "#f2495c", "#5794f2", "#ff9830", "#9d7bd8", "#70dbed"]
             color_idx = 0
             
-            for client_id in sorted(aggregated_client_data.keys()):
-                # Build values array for this client
-                values = []
-                for timestamp in sorted_timestamps:
-                    values.append(aggregated_client_data[client_id].get(timestamp, None))
+            # Process each client
+            for client_id in sorted(client_names.keys()):
+                client_df = aggregated_df[aggregated_df['client_id'] == client_id]
                 
+                # Create a complete timestamp series with NaN for missing values
+                client_series = pd.Series(index=all_timestamps, dtype=float)
+                client_series.loc[client_df['timestamp']] = client_df['value'].values
+                
+                # Debug: check what's actually in the data
+                print(f"DEBUG: client_series dtype: {client_series.dtype}")
+                print(f"DEBUG: client_series has NaN: {client_series.isna().any()}")
+                print(f"DEBUG: client_series has inf: {np.isinf(client_series).any()}")
+                print(f"DEBUG: sample values: {client_series.dropna().head(5).tolist()}")
+                
+                # Convert to list, replacing NaN with None
+                values = client_series.replace(np.nan, None).tolist()
+                print(f"DEBUG: final values sample: {[v for v in values[:10] if v is not None][:5]}")
                 uplot_data.append(values)
                 
                 # Add series configuration
@@ -638,7 +633,8 @@ def create_app(config: ServerConfig) -> FastAPI:
                     "label": client_names[client_id],
                     "stroke": colors[color_idx % len(colors)],
                     "width": 2,
-                    "show": True
+                    "show": True,
+                    "spanGaps": True  # Connect lines across missing data points
                 })
                 color_idx += 1
             
@@ -666,7 +662,9 @@ def create_app(config: ServerConfig) -> FastAPI:
             }
             
         except Exception as e:
+            import traceback
             logger.error(f"Error getting {metric_name} timeseries: {e}")
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
             raise HTTPException(status_code=500, detail="Failed to get timeseries data")
 
     @app.get("/api/stats", dependencies=[Depends(require_admin_auth)])
