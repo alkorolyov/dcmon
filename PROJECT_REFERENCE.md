@@ -8,7 +8,9 @@
 **Authentication (SSH-like):**
 - RSA key pairs + signature verification (PKCS1v15 + SHA256)
 - Admin-controlled registration, zero public endpoints
-- One-time admin token use, clients never store admin credentials
+- Basic Auth for admin operations (username: "admin", password: admin_token)
+- Test mode auto-registration with dev_admin_token_12345
+- Production mode prompts for secure admin token
 
 **Database (Peewee ORM):**
 - Models: Client, MetricSeries, MetricPoints{Int,Float}, Command
@@ -22,7 +24,8 @@
 
 **Configuration (YAML + Pydantic):**
 - Unified auth_dir for all security files
-- test_mode controls admin token fallback
+- test_mode enables auto-registration with known dev token
+- CLI args only override when explicitly provided (preserves config values)
 - Consistent client/server config patterns
 
 ## Current Architecture
@@ -169,9 +172,12 @@ TABLE_COLUMNS = [
 **Operations:**
 - Services: `systemctl {start|stop|status} dcmon-{server|client}`
 - Health check: `GET /health` (admin auth required)
-- Verification: `curl https://server:8000/api/clients` with admin token
-- **Testing**: Use admin token `dev_admin_token_12345` when `test_mode` is enabled
-- **Test Mode**: Start server with `python3 main.py -c config_test.yaml`
+- Verification: `curl -u admin:dev_admin_token_12345 https://server:8000/api/clients`
+- **Client Registration**: 
+  - Test mode: `python3 client.py -c config_test.yaml` (auto-uses dev token)
+  - Production: `python3 client.py` (prompts for admin token)
+- **Admin Authentication**: Basic Auth with username "admin" and admin_token as password
+- **Test Mode**: Server `python3 main.py -c config_test.yaml`, Client auto-registration
 
 **Performance & Architecture:**
 - **Network**: 87% compression (5.6KB → 0.7KB)
