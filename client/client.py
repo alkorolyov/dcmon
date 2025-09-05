@@ -90,11 +90,11 @@ class ClientConfig:
     
     def override_with_args(self, args: argparse.Namespace) -> "ClientConfig":
         """Override config with command line arguments if provided"""
-        # Direct override - CLI args take precedence
-        self.auth_dir = args.auth_dir
-        self.server = args.server  
-        self.interval = args.interval
-        self.log_level = args.log_level
+        # Only override if explicitly provided - preserves config file values
+        self.auth_dir = args.auth_dir if args.auth_dir is not None else self.auth_dir
+        self.server = args.server if args.server is not None else self.server  
+        self.interval = args.interval if args.interval is not None else self.interval
+        self.log_level = args.log_level if args.log_level is not None else self.log_level
         self.once = args.once
         self.registration = args.registration
         return self
@@ -508,8 +508,10 @@ async def run_client(config: ClientConfig) -> None:
     # Initialize metrics collector once (singleton exporters) with hardware info
     metrics_collector = MetricsCollector(hw_info=hw_info)
     
-    # Metrics loop
+    # Metrics loop with reconnection logging
     LOG.info("client starting; posting metrics to %s every %ss", config.server, config.interval)
+    connection_failed = False
+    
     while True:
         try:
             batch = await metrics_collector.collect_metrics()
@@ -517,15 +519,24 @@ async def run_client(config: ClientConfig) -> None:
                 LOG.warning("no metrics collected")
             res = send_metrics(config.server, token, batch, hw_hash)
             LOG.debug("sent metrics: %s", res)
+            
+            # Log successful reconnection after failures
+            if connection_failed:
+                LOG.info("successfully reconnected to server: %s", config.server)
+                connection_failed = False
+                
         except HTTPError as e:
+            connection_failed = True
             try:
                 msg = e.read().decode("utf-8")
             except Exception:
                 msg = str(e)
             LOG.error("HTTP %s error from server: %s", getattr(e, "code", "?"), msg)
         except URLError as e:
+            connection_failed = True
             LOG.error("failed to reach server: %s", e)
         except Exception as e:
+            connection_failed = True
             LOG.exception("unexpected error during metrics send: %s", e)
 
         if config.once:
@@ -537,17 +548,17 @@ def main():
     parser = argparse.ArgumentParser(description="dcmon client")
     parser.add_argument("--config", "-c", type=Path, default=Path("config.yaml"),
                         help="YAML configuration file (default: config.yaml)")
-    parser.add_argument("--auth-dir", default="/etc/dcmon", dest="auth_dir",
+    parser.add_argument("--auth-dir", dest="auth_dir",
                         help="directory for client credentials (private key, public key, client token)")
-    parser.add_argument("--server", default="https://127.0.0.1:8000",
+    parser.add_argument("--server",
                         help="dcmon server base URL (e.g., https://server:8000)")
-    parser.add_argument("--interval", type=int, default=30,
+    parser.add_argument("--interval", type=int,
                         help="seconds between metric posts")
     parser.add_argument("--once", action="store_true",
                         help="send one metrics batch and exit")
     parser.add_argument("--registration", action="store_true",
                         help="print a registration request JSON to stdout and exit")
-    parser.add_argument("--log-level", default="INFO",
+    parser.add_argument("--log-level",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="logging level")
     args = parser.parse_args()
 
