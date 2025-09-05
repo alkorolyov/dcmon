@@ -358,11 +358,9 @@ if __name__ == "__main__":
         mgr = DatabaseManager(tmp.name)
         assert mgr.connect()
         cid = mgr.register_client(hostname="host-a", client_token="tok-123", public_key="PEM...")
-        print("client_id:", cid)
         # Test new schema
         series = MetricSeries.get_or_create_series(cid, "cpu_temp_c", None, "float")
         MetricPointsFloat.create(series=series, timestamp=int(time.time()), value=51.7)
         pending = Command.get_pending_for_client(cid)
-        print("pending commands:", len(pending))
-        print("stats:", mgr.get_stats())
+        stats = mgr.get_stats()
         mgr.close()

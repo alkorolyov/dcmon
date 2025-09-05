@@ -1,0 +1,139 @@
+/**
+ * CSS Variables - Global Design System
+ * 
+ * Grafana-inspired color palette and consistent design tokens
+ */
+
+:root {
+    /* Color Palette */
+    --primary-color: #5794f2;
+    --primary-hover: #4a85e3;
+    --success-color: #73bf69;
+    --warning-color: #ff9830;
+    --danger-color: #f2495c;
+    --info-color: #70dbed;
+    
+    /* Background Colors */
+    --bg-primary: #ffffff;
+    --bg-secondary: #f7f8fa;
+    --bg-tertiary: #eaecf0;
+    --hover-bg: #f0f1f4;
+    
+    /* Text Colors */
+    --text-primary: #1f2937;
+    --text-secondary: #6e7680;
+    --text-tertiary: #9aa0a6;
+    --text-muted: #c4c7cc;
+    
+    /* Border Colors */
+    --border-color: #dcdee1;
+    --border-light: #f0f1f4;
+    --border-dark: #c4c7cc;
+    
+    /* Chart Colors */
+    --chart-green: #73bf69;
+    --chart-red: #f2495c;
+    --chart-blue: #5794f2;
+    --chart-orange: #ff9830;
+    --chart-purple: #9d7bd8;
+    --chart-cyan: #70dbed;
+    
+    /* Status Colors */
+    --status-good: rgba(115, 191, 105, 0.15);
+    --status-good-text: #2d5a2d;
+    --status-good-border: rgba(115, 191, 105, 0.3);
+    
+    --status-warning: rgba(255, 152, 48, 0.15);
+    --status-warning-text: #8b4000;
+    --status-warning-border: rgba(255, 152, 48, 0.3);
+    
+    --status-critical: rgba(242, 73, 92, 0.15);
+    --status-critical-text: #8b1538;
+    --status-critical-border: rgba(242, 73, 92, 0.3);
+    
+    --status-neutral: rgba(110, 118, 128, 0.1);
+    --status-neutral-text: var(--text-secondary);
+    --status-neutral-border: rgba(110, 118, 128, 0.2);
+    
+    /* Typography */
+    --font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "SF Mono", Monaco, Inconsolata, "Roboto Mono", Consolas, "Courier New", monospace;
+    
+    --font-size-xs: 11px;
+    --font-size-sm: 12px;
+    --font-size-base: 13px;
+    --font-size-md: 14px;
+    --font-size-lg: 16px;
+    --font-size-xl: 18px;
+    
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+    
+    /* Spacing */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 12px;
+    --spacing-lg: 16px;
+    --spacing-xl: 24px;
+    --spacing-2xl: 32px;
+    
+    /* Border Radius */
+    --radius-sm: 2px;
+    --radius-base: 3px;
+    --radius-md: 4px;
+    --radius-lg: 6px;
+    --radius-xl: 8px;
+    
+    /* Shadows */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-base: 0 1px 3px rgba(0, 0, 0, 0.1);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+    --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.1);
+    
+    /* Z-Index Scale */
+    --z-dropdown: 1000;
+    --z-sticky: 1020;
+    --z-fixed: 1030;
+    --z-modal-backdrop: 1040;
+    --z-modal: 1050;
+    --z-popover: 1060;
+    --z-tooltip: 1070;
+    
+    /* Transitions */
+    --transition-fast: 0.15s ease;
+    --transition-base: 0.2s ease;
+    --transition-slow: 0.3s ease;
+    
+    /* Layout */
+    --header-height: 48px;
+    --sidebar-width: 240px;
+    --container-max-width: 1200px;
+}
+
+/* Dark Mode Variables (Optional) */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg-primary: #1f2937;
+        --bg-secondary: #374151;
+        --bg-tertiary: #4b5563;
+        --hover-bg: #374151;
+        
+        --text-primary: #f9fafb;
+        --text-secondary: #d1d5db;
+        --text-tertiary: #9ca3af;
+        --text-muted: #6b7280;
+        
+        --border-color: #4b5563;
+        --border-light: #374151;
+        --border-dark: #6b7280;
+    }
+}
+
+/* Responsive Breakpoints */
+@custom-media --screen-sm (min-width: 576px);
+@custom-media --screen-md (min-width: 768px);
+@custom-media --screen-lg (min-width: 992px);
+@custom-media --screen-xl (min-width: 1200px);

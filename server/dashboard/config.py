@@ -60,30 +60,42 @@ def get_metric_status(metric_name: str, value: float) -> str:
     
     return 'normal'
 
-def format_metric_value(value: Any, format_type: str) -> str:
+def format_metric_value(value: Any, unit: str) -> str:
     """
-    Format a metric value according to its type.
+    Format a metric value with proper rounding and unit.
     
     Args:
         value: Raw metric value
-        format_type: Type of formatting to apply
+        unit: Unit string (e.g., "°", "%", "W")
         
     Returns:
-        Formatted string representation
+        Formatted string representation with proper rounding
     """
     if value is None or value == '':
         return '—'
     
     try:
-        if format_type == "percentage":
-            return f"{float(value):.0f}%"
-        elif format_type == "temperature":
-            return f"{float(value):.0f}°"
-        elif format_type == "power":
-            return f"{float(value):.0f}W"
-        elif format_type == "frequency":
-            return f"{float(value):.0f}MHz"
+        # Convert to float for proper rounding
+        num_val = float(value)
+        
+        # Round based on value magnitude for better readability
+        if unit == "%":
+            # Percentages: round to 1 decimal if < 10, else integer
+            if num_val < 10:
+                return f"{num_val:.1f}%"
+            else:
+                return f"{num_val:.0f}%"
+        elif unit == "°":
+            # Temperatures: always integer
+            return f"{num_val:.0f}°"
+        elif unit == "W":
+            # Power: always integer 
+            return f"{num_val:.0f}W"
         else:
-            return str(value)
+            # Other units: round to 1 decimal if < 10, else integer
+            if num_val < 10:
+                return f"{num_val:.1f}{unit}"
+            else:
+                return f"{num_val:.0f}{unit}"
     except (ValueError, TypeError):
         return '—'

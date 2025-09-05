@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+
+{% block title %}dcmon Dashboard{% endblock %}
+
+{% block head %}
+    <!-- Chart Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.24/dist/uPlot.iife.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.24/dist/uPlot.min.css">
+    
+    <!-- Component Styles -->
+    <link rel="stylesheet" href="{{ url_for('static', path='ui/styles/variables.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='ui/styles/global.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='ui/styles/layout.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='ui/components/charts/chart_styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='ui/components/tables/table_styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='ui/components/controls/control_styles.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-layout">
+    <!-- Dashboard Header with Controls -->
+    <div class="dashboard-header">
+        <div class="dashboard-title">
+            dcmon Dashboard
+        </div>
+        
+        <div class="system-overview">
+            <div class="overview-stat">
+                <span class="stat-label">Total:</span>
+                <span class="stat-value">{{ system_overview.total_clients }}</span>
+            </div>
+            <div class="overview-stat">
+                <span class="stat-label">Online:</span>
+                <span class="stat-value online">{{ system_overview.online_clients }}</span>
+            </div>
+            <div class="overview-stat">
+                <span class="stat-label">Last refresh:</span>
+                <span class="refresh-time">{{ timestamp | format_time }}</span>
+            </div>
+        </div>
+        
+        <div class="dashboard-controls">
+            <!-- Time Range Dropdown -->
+            <div class="dropdown">
+                <button class="dropdown-toggle" id="timerange-btn" type="button">
+                    <span class="dropdown-text">Last day</span>
+                </button>
+                <div class="dropdown-menu" id="timerange-dropdown">
+                    <button class="dropdown-item active" data-value="24h">Last day</button>
+                    <button class="dropdown-item" data-value="6h">Last 6 hours</button>
+                    <button class="dropdown-item" data-value="1h">Last hour</button>
+                    <div class="dropdown-divider"></div>
+                    <button class="dropdown-item" data-value="7d">Last week</button>
+                    <button class="dropdown-item" data-value="custom">Custom range</button>
+                </div>
+            </div>
+            
+            <!-- Refresh Interval Dropdown -->
+            <div class="dropdown">
+                <button class="dropdown-toggle" id="refresh-interval-btn" type="button">
+                    <span class="dropdown-text">30s</span>
+                </button>
+                <div class="dropdown-menu" id="refresh-dropdown">
+                    <button class="dropdown-item" data-value="10">10s</button>
+                    <button class="dropdown-item" data-value="15">15s</button>
+                    <button class="dropdown-item active" data-value="30">30s</button>
+                    <button class="dropdown-item" data-value="60">1m</button>
+                    <button class="dropdown-item" data-value="300">5m</button>
+                    <div class="dropdown-divider"></div>
+                    <button class="dropdown-item" data-value="pause">Pause</button>
+                    <button class="dropdown-item" data-value="custom">Custom</button>
+                </div>
+            </div>
+            
+            <!-- Manual Refresh Button -->
+            <button class="refresh-btn" id="manual-refresh-btn" type="button">
+                <span class="refresh-icon">⟳</span>
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    <div class="dashboard-main">
+        <!-- Critical Health Table -->
+        <div class="section">
+            <div id="clients-table-container" 
+                 hx-get="/dashboard/refresh/clients" 
+                 hx-trigger="load, every 30s"
+                 hx-swap="innerHTML">
+                {% include "tables/clients_table.html" %}
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="section">
+            <h2 class="section-title">System Metrics</h2>
+            <div class="charts-section">
+                <!-- GPU Temperature Chart -->
+                {% with chart_id='gpu-temp-chart', chart_title='GPU Temperature' %}
+                    {% include "charts/chart_container.html" %}
+                {% endwith %}
+                
+                <!-- CPU Temperature Chart -->
+                {% with chart_id='cpu-temp-chart', chart_title='CPU Temperature' %}
+                    {% include "charts/chart_container.html" %}
+                {% endwith %}
+                
+                <!-- Memory Usage Chart -->
+                {% with chart_id='memory-usage-chart', chart_title='Memory Usage' %}
+                    {% include "charts/chart_container.html" %}
+                {% endwith %}
+                
+                <!-- CPU Usage Chart -->
+                {% with chart_id='cpu-usage-chart', chart_title='CPU Usage' %}
+                    {% include "charts/chart_container.html" %}
+                {% endwith %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+    <!-- Component Scripts -->
+    <script src="{{ url_for('static', path='ui/components/charts/chart_manager.js') }}"></script>
+    <script src="{{ url_for('static', path='ui/components/charts/timeseries_chart.js') }}"></script>
+    <script src="{{ url_for('static', path='ui/components/tables/clients_table.js') }}"></script>
+    <script src="{{ url_for('static', path='ui/components/controls/dashboard_controls.js') }}"></script>
+    
+    <!-- Dashboard Initialization -->
+    <script>
+    // Initialize dashboard when DOM is ready
+    document.addEventListener('DOMContentLoaded', function() {
+        if (typeof uPlot === 'undefined') {
+            throw new Error('uPlot library not loaded');
+        }
+        if (!window.chartManager) {
+            throw new Error('ChartManager not available');
+        }
+        if (!window.TimeSeriesChart) {
+            throw new Error('TimeSeriesChart not available');
+        }
+        
+        initializeDashboard();
+    });
+
+    function initializeDashboard() {
+        // Prevent double initialization
+        if (window.dashboardInitialized) {
+            console.log('Dashboard already initialized, skipping');
+            return;
+        }
+        
+        // Initialize clients table
+        window.clientsTable = new ClientsTable('clients-table-container', {
+            refreshInterval: 30000,
+            autoRefresh: true
+        });
+        
+        // Initialize charts (uses singleton pattern)
+        initializeCharts();
+        
+        window.dashboardInitialized = true;
+        console.log('Dashboard initialized successfully');
+    }
+
+    function initializeCharts() {
+        // GPU Temperature Chart
+        const gpuTempChart = TimeSeriesChart.createGpuTempChart('gpu-temp-chart');
+        gpuTempChart.initialize();
+        
+        // CPU Temperature Chart
+        const cpuTempChart = TimeSeriesChart.createCpuTempChart('cpu-temp-chart');
+        cpuTempChart.initialize();
+        
+        // Memory Usage Chart
+        const memoryChart = TimeSeriesChart.createMemoryUsageChart('memory-usage-chart');
+        memoryChart.initialize();
+        
+        // CPU Usage Chart
+        const cpuUsageChart = TimeSeriesChart.createCpuUsageChart('cpu-usage-chart');
+        cpuUsageChart.initialize();
+        
+        // Store chart references globally for controls
+        window.dashboardCharts = {
+            gpuTemp: gpuTempChart,
+            cpuTemp: cpuTempChart,
+            memory: memoryChart,
+            cpuUsage: cpuUsageChart
+        };
+        
+        console.log('All charts initialized');
+    }
+    </script>
+{% endblock %}

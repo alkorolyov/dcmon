@@ -1,0 +1,116 @@
+<!-- Chart Container Component - All chart states in one template -->
+<div class="chart-container">
+    <div class="chart-wrapper">
+        <!-- Chart content area where uPlot renders -->
+        <div class="chart-content" id="{{ chart_id }}"></div>
+        
+        <!-- Loading state (initially visible) -->
+        <div class="chart-loading" id="{{ chart_id }}-loading">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading {{ chart_title or 'chart' }} data...</div>
+        </div>
+        
+        <!-- Error state (hidden by default) -->
+        <div class="chart-error hidden" id="{{ chart_id }}-error">
+            <div class="chart-error-content">
+                <div class="chart-error-title">Chart Error</div>
+                <div class="chart-error-message" id="{{ chart_id }}-error-message">
+                    Failed to load chart data
+                </div>
+                <button class="chart-retry-btn" onclick="retryChart('{{ chart_id }}')">
+                    Retry
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Chart container component styles */
+.chart-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 300px;
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.loading-spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--border-color);
+    border-top: 2px solid var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 12px;
+}
+
+.loading-text {
+    font-weight: 500;
+}
+
+.chart-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 300px;
+    background: #f7f8fa;
+    border: 1px solid #dcdee1;
+    border-radius: 3px;
+    color: #6e7680;
+    font-family: Inter, sans-serif;
+}
+
+.chart-error-content {
+    text-align: center;
+}
+
+.chart-error-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+    font-size: 16px;
+}
+
+.chart-error-message {
+    color: var(--text-secondary);
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
+.chart-retry-btn {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.chart-retry-btn:hover {
+    background: var(--primary-hover);
+}
+
+.hidden {
+    display: none !important;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+</style>
+
+<script>
+// Global retry function for chart errors
+function retryChart(chartId) {
+    if (window.chartManager) {
+        window.chartManager.loadChartData(chartId);
+    } else {
+        console.warn('ChartManager not available for retry');
+    }
+}
+</script>

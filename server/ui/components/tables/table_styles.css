@@ -1,0 +1,252 @@
+/**
+ * Table Component Styles
+ * 
+ * Styles for the clients health table and other dashboard tables
+ */
+
+/* Tables Container */
+.dashboard-tables-container {
+    margin-bottom: 16px;
+}
+
+.metric-table-section {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.metric-table-container {
+    position: relative;
+}
+
+.table-scroll-container {
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-height: 70vh;
+}
+
+/* Table Base Styles */
+.metric-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 13px;
+    background: var(--bg-primary);
+}
+
+/* Table Header */
+.metric-table thead th {
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+/* Table Body */
+.metric-table tbody tr {
+    border-bottom: 1px solid var(--border-light);
+    transition: background-color 0.15s ease;
+}
+
+.metric-table tbody tr:hover {
+    background: var(--hover-bg);
+}
+
+.metric-table tbody tr.highlighted {
+    background: rgba(115, 191, 105, 0.1);
+    border-color: var(--success-color);
+}
+
+/* Client Row States */
+.client-row.online {
+    opacity: 1;
+}
+
+.client-row.offline {
+    opacity: 0.6;
+    background: rgba(255, 255, 255, 0.5);
+}
+
+/* Table Cells */
+.metric-table td {
+    padding: 8px 12px;
+    vertical-align: middle;
+    border-right: 1px solid var(--border-light);
+}
+
+.metric-table td:last-child {
+    border-right: none;
+}
+
+/* Column Widths - Optimized for Content */
+.col-status {
+    width: 30px;
+    text-align: center;
+}
+
+.col-hostname {
+    min-width: 80px;
+    max-width: 100px;
+}
+
+/* Temperature columns - narrow for "76°" values */
+.col-cpu-temp,
+.col-nvme-temp,
+.col-vrm-temp,
+.col-gpu-temp {
+    width: 55px;
+    text-align: center;
+}
+
+/* Power columns - wider for "450W" values */
+.col-gpu-power,
+.col-gpu-limit {
+    width: 65px;
+    text-align: center;
+}
+
+/* Percentage columns - medium for "22.5%" values */
+.col-cpu-usage,
+.col-gpu-fan,
+.col-ram,
+.col-disk-root,
+.col-disk-docker {
+    width: 60px;
+    text-align: center;
+}
+
+/* Status Indicator */
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin: 0 auto;
+}
+
+.status-dot.online {
+    background: var(--success-color);
+    box-shadow: 0 0 4px rgba(115, 191, 105, 0.5);
+}
+
+.status-dot.offline {
+    background: var(--text-tertiary);
+}
+
+/* Hostname Cell */
+.hostname-cell {
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Critical Health Color Coding - Full Cell Styling */
+.metric-table td.critical-data {
+    text-align: center;
+    font-weight: normal;
+    font-size: 13px;
+}
+
+.metric-table td.critical-data.low {
+    background: rgba(115, 191, 105, 0.15);
+    color: #2d5a2d;
+}
+
+.metric-table td.critical-data.normal {
+    background: rgba(135, 206, 235, 0.15);
+    color: #1e5a96;
+}
+
+.metric-table td.critical-data.high {
+    background: rgba(255, 152, 48, 0.15);
+    color: #8b4000;
+}
+
+.metric-table td.critical-data.critical {
+    background: rgba(242, 73, 92, 0.15);
+    color: #8b1538;
+}
+
+.metric-table td.critical-data.neutral {
+    background: rgba(110, 118, 128, 0.1);
+    color: var(--text-secondary);
+}
+
+.metric-table td.critical-data.no-data {
+    background: transparent;
+    color: var(--text-tertiary);
+    font-style: italic;
+}
+
+/* Table Loading State */
+.metric-table.table-loading {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.metric-table.table-loading::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.2) 50%,
+        transparent 100%
+    );
+    animation: tableLoading 1.5s infinite;
+    z-index: 20;
+}
+
+@keyframes tableLoading {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+    .metric-table {
+        font-size: 12px;
+    }
+    
+    .col-gpu-limit {
+        display: none; /* Hide GPU limit on smaller screens */
+    }
+}
+
+@media (max-width: 900px) {
+    .col-vrm-temp,
+    .col-gpu-fan,
+    .col-disk-docker {
+        display: none; /* Hide less critical columns on mobile */
+    }
+    
+    .metric-table thead th,
+    .metric-table td {
+        padding: 6px 8px;
+    }
+}
+
+@media (max-width: 600px) {
+    .col-gpu-power,
+    .col-disk-root {
+        display: none; /* Minimal columns on very small screens */
+    }
+    
+    .hostname-cell {
+        max-width: 100px;
+    }
+}

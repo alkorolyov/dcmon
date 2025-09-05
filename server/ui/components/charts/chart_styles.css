@@ -1,0 +1,146 @@
+/**
+ * Chart Component Styles
+ * 
+ * Styles for time series charts optimized for two-per-row layout
+ */
+
+/* Charts Container - Two Per Row Layout */
+.charts-section {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+/* Individual Chart Container - 50% Width Layout */
+.chart-container {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    padding: 0;
+    width: calc(50% - 4px); /* Exactly two per row, accounting for 8px gap */
+    min-width: 400px; /* Minimum width for readability */
+    box-sizing: border-box;
+}
+
+/* Chart Content Wrapper */
+.chart-wrapper {
+    padding: 12px;
+    min-height: 300px;
+    position: relative;
+}
+
+/* Chart Content Area - Ensure proper sizing for uPlot */
+.chart-content {
+    position: relative;
+    width: 100%;
+    height: 300px;
+    min-height: 300px;
+    display: block;
+    visibility: visible;
+}
+
+/* Responsive: Single column on smaller screens */
+@media (max-width: 900px) {
+    .charts-section {
+        flex-direction: column;
+    }
+    
+    .chart-container {
+        width: 100%;
+        min-width: unset;
+    }
+}
+
+/* uPlot Styling Overrides for Thinner Lines */
+.u-title {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.u-legend {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 12px;
+    margin-top: 8px;
+}
+
+.u-legend .u-label {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.u-legend .u-marker {
+    border-radius: 50%;
+    width: 8px;
+    height: 8px;
+}
+
+/* Chart Error States */
+.chart-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 300px;
+    background: #f7f8fa;
+    border: 1px solid #dcdee1;
+    border-radius: 3px;
+    color: #6e7680;
+    font-family: Inter, sans-serif;
+    font-size: 14px;
+}
+
+.chart-error-content {
+    text-align: center;
+}
+
+.chart-error-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+
+.chart-error-message {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+/* Chart Loading State */
+.chart-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 300px;
+    color: var(--text-secondary);
+    font-style: italic;
+    font-size: 14px;
+}
+
+/* Chart Responsive Behavior */
+.chart-wrapper canvas {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Hover Effects for Better UX */
+.chart-container:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+}
+
+/* Chart Grid Optimization */
+.u-axis {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+/* Optimized Plot Area */
+.u-plot {
+    background: var(--bg-primary);
+    border-radius: 2px;
+}

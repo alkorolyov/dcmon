@@ -13,12 +13,88 @@ from datetime import datetime, timedelta
 # Support running as script or as package
 try:
     from ..models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, Command
+    from ..api.metric_queries import MetricQueryBuilder
 except ImportError:
     from models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, Command
+    from api.metric_queries import MetricQueryBuilder
 
 from .config import get_metric_status, format_metric_value, METRIC_THRESHOLDS
 
 logger = logging.getLogger("dcmon.dashboard")
+
+# Smart table column configuration with direct MetricQueryBuilder parameter mapping
+TABLE_COLUMNS = [
+    # Temperature and hardware metrics first
+    {
+        "metric_name": "ipmi_temp_celsius",
+        "label_filters": [{"sensor": "CPU Temp"}, {"sensor": "TEMP_CPU"}],
+        "aggregation": "max",
+        "header": "CPU°C", "unit": "°", "css_class": "col-cpu-temp"
+    },
+    
+    # VRM temperature (max across all VRM sensors)
+    {
+        "metric_name": "ipmi_temp_celsius",
+        "label_filters": [{"sensor": "CPU_VRM Temp"}, {"sensor": "SOC_VRM Temp"}, {"sensor": "VRMABCD Temp"}, {"sensor": "VRMEFGH Temp"}, {"sensor": "FSC_INDEX1"}],
+        "aggregation": "max",
+        "header": "VRM°C", "unit": "°", "css_class": "col-vrm-temp"
+    },
+    
+    # NVME temperature (useful storage metric)
+    {
+        "metric_name": "nvme_temperature_celsius",
+        "aggregation": "max",
+        "header": "NVME°C", "unit": "°", "css_class": "col-nvme-temp"
+    },
+    
+    # GPU metrics with aggregation
+    {
+        "metric_name": "gpu_temperature",
+        "aggregation": "max",
+        "header": "GPU°C", "unit": "°", "css_class": "col-gpu-temp"
+    },
+    {
+        "metric_name": "gpu_power_draw",
+        "aggregation": "max",
+        "header": "GPU Power", "unit": "W", "css_class": "col-gpu-power"
+    },
+    {
+        "metric_name": "gpu_power_limit",
+        "aggregation": "max",
+        "header": "GPU Limit", "unit": "W", "css_class": "col-gpu-limit", "no_threshold": True
+    },
+    {
+        "metric_name": "gpu_fan_speed",
+        "aggregation": "max",
+        "header": "GPU Fan%", "unit": "%", "css_class": "col-gpu-fan"
+    },
+    
+    # Usage metrics - typically single series per client
+    {
+        "metric_name": "cpu_usage_percent",
+        "header": "CPU%", "unit": "%", "css_class": "col-cpu-usage"
+    },
+    {
+        "metric_name": "memory_usage_percent",
+        "header": "RAM%", "unit": "%", "css_class": "col-ram"
+    },
+    {
+        "operation": "fraction",
+        "metric_name": "disk_usage_percent",
+        "numerator": {"metric_name": "fs_used_bytes", "label_filters": [{"mountpoint": "/"}]},
+        "denominator": {"metric_name": "fs_total_bytes", "label_filters": [{"mountpoint": "/"}]},
+        "multiply_by": 100,
+        "header": "Root%", "unit": "%", "css_class": "col-disk-root"
+    },
+    {
+        "operation": "fraction",
+        "metric_name": "disk_usage_percent",
+        "numerator": {"metric_name": "fs_used_bytes", "label_filters": [{"mountpoint": "/var/lib/docker"}]},
+        "denominator": {"metric_name": "fs_total_bytes", "label_filters": [{"mountpoint": "/var/lib/docker"}]},
+        "multiply_by": 100,
+        "header": "Docker%", "unit": "%", "css_class": "col-disk-docker"
+    },
+]
 
 
 class DashboardController:
@@ -51,13 +127,14 @@ class DashboardController:
                 "online_clients": len([c for c in clients_data if c.get('status') == 'online']),
                 "system_overview": self._get_system_overview_data(),
                 "recent_alerts": self._get_recent_alerts(),
+                "table_columns": TABLE_COLUMNS,
             }
             
             logger.debug(f"Dashboard data prepared: {len(dashboard_data)} sections")
             return dashboard_data
             
         except Exception as e:
-            logger.error(f"Error generating dashboard data: {e}")
+            logger.error(f"Error generating dashboard data: {e}", exc_info=True)
             return {
                 "page_title": "dcmon Dashboard - Error",
                 "timestamp": int(time.time()),
@@ -96,6 +173,10 @@ class DashboardController:
             clients.append(client_data)
         
         logger.debug(f"Processed {len(clients)} clients")
+        
+        # Prepare metric data for smart table rendering
+        clients = self._prepare_client_metrics(clients)
+        
         return clients
     
     def _get_client_latest_metrics(self, client_id: int) -> Dict[str, Any]:
@@ -111,304 +192,11 @@ class DashboardController:
         # Get latest metrics (both int and float)
         latest_metrics = {}
         
-        # Get individual system metrics
-        individual_metrics = ['cpu_usage_percent', 'memory_usage_percent', 'cpu_load_1m']
-        for metric_name in individual_metrics:
-            value = self._get_latest_metric_value(client_id, metric_name)
-            if value is not None:
-                latest_metrics[metric_name] = value
-        
-            
-            
-        # Get critical health metrics
-        cpu_temp_single = self._get_cpu_temp_single(client_id)
-        if cpu_temp_single is not None:
-            latest_metrics['cpu_temp_single'] = cpu_temp_single
-            
-        vrm_temp_max = self._get_max_vrm_temp(client_id)
-        if vrm_temp_max is not None:
-            latest_metrics['vrm_temp_max'] = vrm_temp_max
-            
-        gpu_temp_max = self._get_max_gpu_temp(client_id)
-        if gpu_temp_max is not None:
-            latest_metrics['gpu_temp_max'] = gpu_temp_max
-            
-        gpu_power_max = self._get_max_gpu_power(client_id)
-        if gpu_power_max is not None:
-            latest_metrics['gpu_power_max'] = gpu_power_max
-            
-        gpu_limit_max = self._get_max_gpu_limit(client_id)
-        if gpu_limit_max is not None:
-            latest_metrics['gpu_limit_max'] = gpu_limit_max
-            
-        gpu_fan_max = self._get_max_gpu_fan(client_id)
-        if gpu_fan_max is not None:
-            latest_metrics['gpu_fan_max'] = gpu_fan_max
-            
-        disk_root_percent = self._get_disk_usage_percent(client_id, '/')
-        if disk_root_percent is not None:
-            latest_metrics['disk_root_percent'] = disk_root_percent
-            
-        disk_docker_percent = self._get_disk_usage_percent(client_id, '/var/lib/docker')
-        if disk_docker_percent is not None:
-            latest_metrics['disk_docker_percent'] = disk_docker_percent
-            
-        
-        
-        
-        return latest_metrics
-    
-    def _get_latest_metric_value(self, client_id: int, metric_name: str) -> Optional[float]:
-        """Get the latest value for a specific metric."""
-        try:
-            # Find the series for this metric
-            series = MetricSeries.select().where(
-                (MetricSeries.client == client_id) &
-                (MetricSeries.metric_name == metric_name)
-            ).first()
-            
-            if not series:
-                return None
-            
-            # Try float points first, then int points
-            latest_float = (MetricPointsFloat.select()
-                           .where(MetricPointsFloat.series == series.id)
-                           .order_by(MetricPointsFloat.timestamp.desc())
-                           .first())
-            
-            if latest_float:
-                return latest_float.value
-            
-            latest_int = (MetricPointsInt.select()
-                         .where(MetricPointsInt.series == series.id)
-                         .order_by(MetricPointsInt.timestamp.desc())
-                         .first())
-            
-            if latest_int:
-                return float(latest_int.value)
-            
-            return None
-            
-        except Exception as e:
-            logger.debug(f"Error getting latest metric {metric_name} for client {client_id}: {e}")
-            return None
+        # This method is now simplified since TABLE_COLUMNS handles all metric display
+        # via centralized MetricQueryBuilder. Legacy individual metric functions removed.
+        return {}
     
     
-    def _get_disk_usage_percent(self, client_id: int, mountpoint: str) -> Optional[float]:
-        """Get disk usage percentage for a specific mountpoint."""
-        try:
-            # Get total bytes for this mountpoint
-            total_series = MetricSeries.select().where(
-                (MetricSeries.client == client_id) &
-                (MetricSeries.metric_name == 'fs_total_bytes') &
-                (MetricSeries.labels.contains(f'"mountpoint":"{mountpoint}"'))
-            ).first()
-            
-            # Get used bytes for this mountpoint  
-            used_series = MetricSeries.select().where(
-                (MetricSeries.client == client_id) &
-                (MetricSeries.metric_name == 'fs_used_bytes') &
-                (MetricSeries.labels.contains(f'"mountpoint":"{mountpoint}"'))
-            ).first()
-            
-            if not total_series or not used_series:
-                return None
-            
-            # Get latest values
-            total_point = (MetricPointsInt.select()
-                          .where(MetricPointsInt.series == total_series.id)
-                          .order_by(MetricPointsInt.timestamp.desc())
-                          .first())
-            
-            used_point = (MetricPointsInt.select()
-                         .where(MetricPointsInt.series == used_series.id)
-                         .order_by(MetricPointsInt.timestamp.desc())
-                         .first())
-            
-            if not total_point or not used_point or total_point.value == 0:
-                return None
-            
-            # Calculate percentage
-            usage_percent = (used_point.value / total_point.value) * 100
-            return usage_percent
-            
-        except Exception as e:
-            logger.debug(f"Error getting disk usage for {mountpoint} on client {client_id}: {e}")
-            return None
-    
-    
-    
-    
-    
-    
-    
-    def _get_cpu_temp_single(self, client_id: int) -> Optional[float]:
-        """Get CPU temperature from both Supermicro and AsRock sensors."""
-        try:
-            # Try both sensor naming conventions
-            cpu_sensors = ['CPU Temp', 'TEMP_CPU']
-            
-            for sensor_name in cpu_sensors:
-                series = MetricSeries.select().where(
-                    (MetricSeries.client == client_id) &
-                    (MetricSeries.metric_name == 'ipmi_temp_celsius') &
-                    (MetricSeries.labels.contains(f'"sensor":"{sensor_name}"'))
-                ).first()
-                
-                if series:
-                    temp_point = (MetricPointsInt.select()
-                                 .where(MetricPointsInt.series == series.id)
-                                 .order_by(MetricPointsInt.timestamp.desc())
-                                 .first())
-                    
-                    if temp_point:
-                        return float(temp_point.value)
-            
-            return None
-            
-        except Exception as e:
-            logger.debug(f"Error getting single CPU temperature for client {client_id}: {e}")
-            return None
-    
-    
-    
-    def _get_max_vrm_temp(self, client_id: int) -> Optional[float]:
-        """Get maximum VRM temperature across all VRM sensors."""
-        try:
-            vrm_sensors = ['CPU_VRM Temp', 'SOC_VRM Temp', 'VRMABCD Temp', 'VRMEFGH Temp']
-            max_temp = None
-            
-            for sensor_name in vrm_sensors:
-                series = MetricSeries.select().where(
-                    (MetricSeries.client == client_id) &
-                    (MetricSeries.metric_name == 'ipmi_temp_celsius') &
-                    (MetricSeries.labels.contains(f'"sensor":"{sensor_name}"'))
-                ).first()
-                
-                if series:
-                    temp_point = (MetricPointsInt.select()
-                                 .where(MetricPointsInt.series == series.id)
-                                 .order_by(MetricPointsInt.timestamp.desc())
-                                 .first())
-                    
-                    if temp_point:
-                        temp_value = float(temp_point.value)
-                        if max_temp is None or temp_value > max_temp:
-                            max_temp = temp_value
-            
-            return max_temp
-            
-        except Exception as e:
-            logger.debug(f"Error getting max VRM temperature for client {client_id}: {e}")
-            return None
-    
-    def _get_max_gpu_temp(self, client_id: int) -> Optional[float]:
-        """Get maximum GPU temperature across all GPUs."""
-        try:
-            gpu_series = list(MetricSeries.select().where(
-                (MetricSeries.client == client_id) &
-                (MetricSeries.metric_name == 'gpu_temperature')
-            ))
-            
-            max_temp = None
-            
-            for series in gpu_series:
-                temp_point = (MetricPointsInt.select()
-                             .where(MetricPointsInt.series == series.id)
-                             .order_by(MetricPointsInt.timestamp.desc())
-                             .first())
-                
-                if temp_point:
-                    temp_value = float(temp_point.value)
-                    if max_temp is None or temp_value > max_temp:
-                        max_temp = temp_value
-            
-            return max_temp
-            
-        except Exception as e:
-            logger.debug(f"Error getting max GPU temperature for client {client_id}: {e}")
-            return None
-    
-    def _get_max_gpu_power(self, client_id: int) -> Optional[float]:
-        """Get maximum GPU power consumption across all GPUs."""
-        try:
-            power_series = list(MetricSeries.select().where(
-                (MetricSeries.client == client_id) &
-                (MetricSeries.metric_name == 'gpu_power_draw')
-            ))
-            
-            max_power = None
-            
-            for series in power_series:
-                power_point = (MetricPointsInt.select()
-                              .where(MetricPointsInt.series == series.id)
-                              .order_by(MetricPointsInt.timestamp.desc())
-                              .first())
-                
-                if power_point:
-                    power_value = float(power_point.value)
-                    if max_power is None or power_value > max_power:
-                        max_power = power_value
-            
-            return max_power
-            
-        except Exception as e:
-            logger.debug(f"Error getting max GPU power for client {client_id}: {e}")
-            return None
-    
-    def _get_max_gpu_limit(self, client_id: int) -> Optional[float]:
-        """Get maximum GPU power limit across all GPUs."""
-        try:
-            limit_series = list(MetricSeries.select().where(
-                (MetricSeries.client == client_id) &
-                (MetricSeries.metric_name == 'gpu_power_limit')
-            ))
-            
-            max_limit = None
-            
-            for series in limit_series:
-                limit_point = (MetricPointsInt.select()
-                              .where(MetricPointsInt.series == series.id)
-                              .order_by(MetricPointsInt.timestamp.desc())
-                              .first())
-                
-                if limit_point:
-                    limit_value = float(limit_point.value)
-                    if max_limit is None or limit_value > max_limit:
-                        max_limit = limit_value
-            
-            return max_limit
-            
-        except Exception as e:
-            logger.debug(f"Error getting max GPU power limit for client {client_id}: {e}")
-            return None
-    
-    def _get_max_gpu_fan(self, client_id: int) -> Optional[float]:
-        """Get maximum GPU fan speed percentage across all GPUs."""
-        try:
-            fan_series = list(MetricSeries.select().where(
-                (MetricSeries.client == client_id) &
-                (MetricSeries.metric_name == 'gpu_fan_speed')
-            ))
-            
-            max_fan = None
-            
-            for series in fan_series:
-                fan_point = (MetricPointsInt.select()
-                            .where(MetricPointsInt.series == series.id)
-                            .order_by(MetricPointsInt.timestamp.desc())
-                            .first())
-                
-                if fan_point:
-                    fan_value = float(fan_point.value)
-                    if max_fan is None or fan_value > max_fan:
-                        max_fan = fan_value
-            
-            return max_fan
-            
-        except Exception as e:
-            logger.debug(f"Error getting max GPU fan speed for client {client_id}: {e}")
-            return None
     
     
     def _get_system_overview_data(self) -> Dict[str, Any]:
@@ -490,3 +278,104 @@ class DashboardController:
             return f"{seconds // 3600}h"
         else:
             return f"{seconds // 86400}d"
+    
+    
+    def get_latest_metric(self, client_id: int, column_config: Dict[str, Any]) -> Optional[float]:
+        """
+        Get latest metric value with support for operations (fraction, rate, sum_over_time).
+        
+        Uses zero parameter mapping for regular metrics and operation dispatch for calculated metrics.
+        """
+        try:
+            operation = column_config.get("operation")
+            
+            if operation == "fraction":
+                return self._calculate_fraction(client_id, column_config)
+            elif operation == "rate":
+                return self._calculate_rate(client_id, column_config)
+            elif operation == "sum_over_time":
+                return self._calculate_sum_over_time(client_id, column_config)
+            else:
+                # Regular metric - direct parameter pass-through to MetricQueryBuilder
+                return MetricQueryBuilder.get_latest_metric_value(
+                    client_id=client_id,
+                    metric_name=column_config["metric_name"],
+                    label_filters=column_config.get("label_filters"),
+                    aggregation=column_config.get("aggregation")
+                )
+                    
+        except Exception as e:
+            logger.error(f"Error getting metric for client {client_id}: {e}", exc_info=True)
+            return None
+    
+    def _calculate_fraction(self, client_id: int, column_config: Dict[str, Any]) -> Optional[float]:
+        """
+        Calculate fraction operation: (numerator / denominator) * multiplier.
+        
+        Uses single optimized query when possible to get both values at the same timestamp.
+        """
+        try:
+            numerator_config = column_config["numerator"]
+            denominator_config = column_config["denominator"]
+            multiplier = column_config.get("multiply_by", 1)
+            
+            # Get numerator value
+            numerator = MetricQueryBuilder.get_latest_metric_value(
+                client_id=client_id,
+                metric_name=numerator_config["metric_name"],
+                label_filters=numerator_config.get("label_filters"),
+                aggregation=numerator_config.get("aggregation")
+            )
+            
+            # Get denominator value
+            denominator = MetricQueryBuilder.get_latest_metric_value(
+                client_id=client_id,
+                metric_name=denominator_config["metric_name"],
+                label_filters=denominator_config.get("label_filters"),
+                aggregation=denominator_config.get("aggregation")
+            )
+            
+            # Calculate fraction
+            if numerator is not None and denominator is not None and denominator != 0:
+                return (numerator / denominator) * multiplier
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error calculating fraction for client {client_id}: {e}", exc_info=True)
+            return None
+    
+    def _prepare_client_metrics(self, clients_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Prepare all metric data for each client using the smart table configuration.
+        
+        This keeps business logic in Python and makes templates pure presentation.
+        """
+        from .config import get_metric_status, format_metric_value
+        
+        for client in clients_data:
+            client["metric_values"] = {}
+            
+            for col in TABLE_COLUMNS:
+                value = self.get_latest_metric(client["id"], col)
+                
+                # Determine status
+                if value is not None:
+                    if col.get('neutral'):
+                        status = 'neutral'
+                    elif col.get('no_threshold'):
+                        status = ''  # No special coloring, just normal table cell
+                    else:
+                        threshold_type = col.get('threshold_type', col["metric_name"])
+                        status = get_metric_status(threshold_type, value)
+                else:
+                    status = 'no-data'
+                
+                # Store prepared data
+                client["metric_values"][col["css_class"]] = {
+                    "value": value,
+                    "formatted": format_metric_value(value, col["unit"]) if value is not None else "—",
+                    "status": status
+                }
+        
+        return clients_data
