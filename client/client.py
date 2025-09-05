@@ -19,6 +19,7 @@ Admin token is only used during initial registration and never stored on client.
 
 import argparse
 import asyncio
+import base64
 import getpass
 import hashlib
 import json
@@ -59,6 +60,7 @@ class ClientConfig:
     log_level: str = "INFO"
     once: bool = False
     registration: bool = False
+    test_mode: bool = False
     exporters: Dict[str, bool] = None
     
     def __post_init__(self):
@@ -412,23 +414,28 @@ def send_metrics(server_base: str, client_token: str, metrics: List[Dict[str, An
     return _post_json(url, data, headers)
 
 
-def register_client_interactively(auth: ClientAuth, server_base: str, hostname: str) -> str:
+def register_client_interactively(auth: ClientAuth, server_base: str, hostname: str, test_mode: bool = False) -> str:
     """
-    Prompt for admin token and register client with server.
+    Register client with server using admin authentication.
+    In test mode, automatically uses dev token. In production, prompts for admin token.
     Returns client_token on success, raises SystemExit on failure.
     """
-    print(f"\n🔐 Client registration required for {hostname}")
-    print("Please enter the admin token to register this client with the server.")
-    
-    try:
-        admin_token = getpass.getpass("Admin token: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        # Fallback for non-interactive environments (testing/IDE)
-        print("\nFallback to regular input (dev mode):")
-        admin_token = input("Admin token: ").strip()
-    
-    if not admin_token:
-        raise SystemExit("ERROR: Admin token cannot be empty.")
+    if test_mode:
+        print(f"\n🔧 Test mode detected - using dev admin token for registration of {hostname}")
+        admin_token = "dev_admin_token_12345"
+    else:
+        print(f"\n🔐 Client registration required for {hostname}")
+        print("Please enter the admin token to register this client with the server.")
+        
+        try:
+            admin_token = getpass.getpass("Admin token: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            # Fallback for non-interactive environments (testing/IDE)
+            print("\nFallback to regular input (dev mode):")
+            admin_token = input("Admin token: ").strip()
+        
+        if not admin_token:
+            raise SystemExit("ERROR: Admin token cannot be empty.")
     
     # Create registration request
     req = auth.create_registration_request(hostname=hostname)
@@ -445,9 +452,10 @@ def register_client_interactively(auth: ClientAuth, server_base: str, hostname: 
     # Add admin token to request (only in memory)  
     req["admin_token"] = admin_token
     
-    # Send registration request
+    # Send registration request using Basic Auth
     url = server_base.rstrip("/") + "/api/clients/register"
-    headers = {"Authorization": f"Bearer {admin_token}"}
+    credentials = base64.b64encode(f"admin:{admin_token}".encode()).decode()
+    headers = {"Authorization": f"Basic {credentials}"}
     
     try:
         response = _post_json(url, req, headers)
@@ -495,7 +503,7 @@ async def run_client(config: ClientConfig) -> None:
     if not token:
         hostname = socket.gethostname()
         # Interactive registration with admin token prompt
-        token = register_client_interactively(auth, config.server, hostname)
+        token = register_client_interactively(auth, config.server, hostname, config.test_mode)
         # Save the client token for future use
         if not auth.save_client_token(token):
             raise SystemExit("ERROR: Failed to save client token after registration.")
