@@ -89,67 +89,44 @@ def is_ipmicfg_available() -> bool:
     logger = logging.getLogger("exporters.ipmicfg_debug")
     
     # Check if we have root privileges (required for PSU monitoring)
-    current_uid = os.geteuid()
-    logger.debug(f"Current UID: {current_uid} (root check: {'PASS' if current_uid == 0 else 'FAIL'})")
-    if current_uid != 0:
-        logger.debug("ipmicfg availability: FAILED - not running as root")
+    if os.geteuid() != 0:
+        logger.debug("ipmicfg availability: FAIL - not running as root")
         return False
     
-    # Test if ipmicfg command works
+    # Test if ipmicfg command works and PSU module is present
     try:
-        logger.debug("Testing ipmicfg -ver command...")
-        result = subprocess.run(
-            ["ipmicfg", "-ver"],
-            capture_output=True,
-            timeout=1
-        )
-        logger.debug(f"ipmicfg -ver exit code: {result.returncode}")
-        logger.debug(f"stdout length: {len(result.stdout)} bytes")
-        logger.debug(f"stderr length: {len(result.stderr)} bytes")
-        
-        available = result.returncode == 0
-        if not available:
-            logger.debug(f"ipmicfg availability: FAIL")
+        result = subprocess.run(["ipmicfg", "-ver"], capture_output=True, timeout=1)
+        if result.returncode != 0:
+            logger.debug("ipmicfg availability: FAIL - command not available")
             return False
             
-        # Also check if PSU module is actually present
-        logger.debug("Testing ipmicfg -pminfo for PSU presence...")
-        try:
-            psu_result = subprocess.run(
-                ["ipmicfg", "-pminfo"],
-                capture_output=True,
-                timeout=2
-            )
-            logger.debug(f"ipmicfg -pminfo exit code: {psu_result.returncode}")
-            
-            if psu_result.returncode != 0:
-                stderr_text = psu_result.stderr.decode(errors="ignore").strip()
-                logger.debug(f"PSU check failed: {stderr_text}")
-                logger.debug("ipmicfg availability: FAIL - no PSU module detected")
-                return False
-                
-            # Check if output contains actual PSU data
-            stdout_text = psu_result.stdout.decode(errors="ignore").strip()
-            if "[Module 1]" not in stdout_text:
-                logger.debug("ipmicfg availability: FAIL - no PSU modules in output")
-                return False
-                
-            logger.debug("ipmicfg availability: PASS - PSU module detected")
-            return True
-            
-        except (subprocess.TimeoutExpired, Exception) as e:
-            logger.debug(f"PSU check failed with exception: {e}")
-            logger.debug("ipmicfg availability: FAIL - PSU check exception")
+        # Check if PSU module is actually present
+        psu_result = subprocess.run(["ipmicfg", "-pminfo"], capture_output=True, timeout=2)
+        if psu_result.returncode != 0:
+            logger.debug("ipmicfg availability: FAIL - no PSU module detected")
             return False
+                
+        # Check if output contains actual PSU data
+        stdout_text = psu_result.stdout.decode(errors="ignore").strip()
+        if "[Module 1]" not in stdout_text:
+            logger.debug("ipmicfg availability: FAIL - no PSU modules in output")
+            return False
+                
+        logger.debug("ipmicfg availability: PASS - PSU module detected")
+        return True
+            
+    except (subprocess.TimeoutExpired, Exception) as e:
+        logger.debug(f"ipmicfg availability: FAIL - {e}")
+        return False
         
     except FileNotFoundError as e:
-        logger.debug(f"ipmicfg availability: FAILED - FileNotFoundError: {e}")
+        logger.debug(f"ipmicfg availability: FAIL - {e}")
         return False
     except subprocess.TimeoutExpired as e:
-        logger.debug(f"ipmicfg availability: FAILED - TimeoutExpired: {e}")
+        logger.debug(f"ipmicfg availability: FAIL - {e}")
         return False
     except Exception as e:
-        logger.debug(f"ipmicfg availability: FAILED - Unexpected error: {e}")
+        logger.debug(f"ipmicfg availability: FAIL - {e}")
         return False
 
 
@@ -223,7 +200,6 @@ class MetricsExporter(ABC):
         
         # Log availability status
         if self.available:
-            self.logger.debug(f"{self.name} metrics enabled")
         else:
             self.logger.info(f"{self.name} metrics disabled - not available")
     

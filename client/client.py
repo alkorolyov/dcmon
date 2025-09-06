@@ -261,7 +261,6 @@ def detect_all_drives() -> List[Dict[str, Any]]:
     try:
         # Get all physical drives
         result = os.popen("lsblk -d -n -o NAME,SIZE,MODEL 2>/dev/null | grep -E '^(sd|nvme|hd)'").read().strip()
-        LOG.debug(f"lsblk all drives result: '{result}'")
         
         if result:
             for line in result.split('\n'):
@@ -281,7 +280,6 @@ def detect_all_drives() -> List[Dict[str, Any]]:
                             "size_gb": size_gb
                         })
         
-        LOG.debug(f"detected all drives: {drives}")
         return drives
     except Exception as e:
         LOG.debug(f"detect_all_drives exception: {e}")
@@ -343,7 +341,6 @@ def detect_hardware() -> Dict[str, Any]:
     # Add hardware hash (exclude machine_id from hash since it's system ID, not hardware)
     hardware["hw_hash"] = create_hardware_hash(hardware)
     
-    LOG.debug(f"detect_hardware result: {hardware}")
     return hardware
 
 # ---------------- Metrics collection (stdlib only) ----------------
