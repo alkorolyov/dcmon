@@ -39,11 +39,11 @@ import yaml
 try:
     # when run as module
     from .auth import ClientAuth, setup_client_auth
-    from .exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter
+    from .exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter
 except ImportError:
     # when run as script from project root
     from auth import ClientAuth, setup_client_auth
-    from exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter
+    from exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter
 
 
 LOG = logging.getLogger("dcmon.client")
@@ -71,7 +71,8 @@ class ClientConfig:
                 "apt": True,
                 "nvme": True,
                 "nvsmi": True,
-                "bmc_fan": True
+                "bmc_fan": True,
+                "ipmicfg_psu": True
             }
     
     @classmethod
@@ -365,6 +366,7 @@ class MetricsCollector:
             NvmeExporter(),
             NvsmiExporter(),
             BMCFanExporter(hw_info=self.hw_info),
+            IpmicfgPsuExporter(),
         ]
         LOG.info(f"Initialized {len(self.exporters)} metrics exporters")
     
