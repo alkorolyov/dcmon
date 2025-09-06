@@ -52,6 +52,52 @@ create_directories() {
     done
 }
 
+install_ipmicfg() {
+    print_step "Installing ipmicfg for Supermicro PSU monitoring..."
+    
+    # Install gdown for downloading ipmicfg
+    if python3 -m pip install gdown==4.6.0 >/dev/null 2>&1; then
+        print_success "Installed gdown"
+    else
+        print_warning "Failed to install gdown - ipmicfg installation skipped"
+        return 0
+    fi
+    
+    # Create temporary directory for download
+    local temp_dir=$(mktemp -d)
+    cd "$temp_dir"
+    
+    # Download ipmicfg using gdown
+    if python3 -m gdown --id 16XOUHmXUr2ckwAunKK01wMsHzB6xEIsx --output ipmicfg >/dev/null 2>&1; then
+        print_success "Downloaded ipmicfg"
+    else
+        print_warning "Failed to download ipmicfg - PSU monitoring will be disabled"
+        rm -rf "$temp_dir"
+        return 0
+    fi
+    
+    # Install ipmicfg to system path
+    if mv ipmicfg /usr/local/bin/ipmicfg && chmod 755 /usr/local/bin/ipmicfg; then
+        print_success "Installed ipmicfg to /usr/local/bin/ipmicfg"
+    else
+        print_warning "Failed to install ipmicfg - PSU monitoring will be disabled"
+        rm -rf "$temp_dir"
+        return 0
+    fi
+    
+    # Clean up
+    rm -rf "$temp_dir"
+    
+    # Verify installation
+    if /usr/local/bin/ipmicfg -ver >/dev/null 2>&1; then
+        print_success "ipmicfg installation verified - PSU monitoring enabled"
+    else
+        print_warning "ipmicfg verification failed - PSU monitoring may not work"
+    fi
+    
+    return 0
+}
+
 install_dependencies() {
     print_step "Installing system dependencies..."
     
@@ -77,6 +123,9 @@ install_dependencies() {
         print_error "Failed to install Python dependencies: requirements.txt is missing"
         return 1
     fi
+    
+    # Install ipmicfg for Supermicro PSU monitoring
+    install_ipmicfg
     
     return 0
 }
