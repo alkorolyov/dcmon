@@ -35,11 +35,32 @@ logger = logging.getLogger("dcmon.server")
 
 
 def setup_logging(config: ServerConfig):
-    """Configure logging early in startup process."""
+    """Configure logging early in startup process including audit logging."""
     log_level = getattr(logging, config.log_level.upper(), logging.INFO)
     logging.basicConfig(level=log_level, format='%(levelname)s:%(name)s:%(message)s')
     logging.getLogger().setLevel(log_level)
     logger.setLevel(log_level)
+    
+    # Configure audit logging with separate file handler
+    audit_logger = logging.getLogger("dcmon.audit")
+    audit_logger.setLevel(logging.INFO)
+    
+    try:
+        from logging.handlers import RotatingFileHandler
+        audit_handler = RotatingFileHandler(
+            "audit.log", 
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5
+        )
+        audit_formatter = logging.Formatter('%(message)s')  # JSON format, no extra formatting
+        audit_handler.setFormatter(audit_formatter)
+        audit_logger.addHandler(audit_handler)
+        
+        # Prevent audit logs from going to console
+        audit_logger.propagate = False
+        logger.info("Audit logging configured: audit.log")
+    except Exception as e:
+        logger.warning(f"Failed to setup audit logging: {e}")
     
     # Silence noisy third-party loggers
     logging.getLogger('peewee').setLevel(logging.WARNING)

@@ -16,11 +16,13 @@ try:
     from ...dashboard.controller import TABLE_COLUMNS
     from ..dependencies import AuthDependencies
     from ...web.template_helpers import setup_template_filters
+    from ...core.audit import audit_logger
 except ImportError:
     from dashboard import DashboardController
     from dashboard.controller import TABLE_COLUMNS
     from api.dependencies import AuthDependencies
     from web.template_helpers import setup_template_filters
+    from core.audit import audit_logger
 
 logger = logging.getLogger("dcmon.server")
 
@@ -41,10 +43,16 @@ def create_dashboard_routes(auth_deps: AuthDependencies) -> APIRouter:
         """Main dashboard page - shows system overview, clients, and metrics."""
         logger.debug("Rendering main dashboard")
         
+        # Log admin dashboard access
+        audit_logger.admin_action(
+            action="dashboard_access",
+            details={"page": "main"},
+            request=request
+        )
+        
         try:
             dashboard_data = dashboard_controller.get_main_dashboard_data()
             dashboard_data["request"] = request
-            
             
             return templates.TemplateResponse("dashboard.html", dashboard_data)
             
@@ -65,6 +73,13 @@ def create_dashboard_routes(auth_deps: AuthDependencies) -> APIRouter:
     def dashboard_refresh_clients(request: Request):
         """Refresh client status table via htmx."""
         logger.debug("Refreshing client status")
+        
+        # Log admin action (refresh clients table)
+        audit_logger.admin_action(
+            action="refresh_clients_table",
+            details={"component": "htmx"},
+            request=request
+        )
         
         try:
             clients = dashboard_controller._get_client_status_data()

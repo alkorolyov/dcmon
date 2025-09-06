@@ -3,6 +3,7 @@
 dcmon API Dependencies - Authentication and Dependency Injection
 """
 
+import base64
 import logging
 from secrets import compare_digest
 from typing import Optional
@@ -13,8 +14,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 # Support running as script or as package
 try:
     from ..models import Client
+    from ..core.audit import audit_logger
 except ImportError:
     from models import Client
+    from core.audit import audit_logger
 
 logger = logging.getLogger("dcmon.server")
 security = HTTPBearer(auto_error=False)
@@ -36,16 +39,30 @@ class AuthDependencies:
         auth_header = request.headers.get("authorization", "")
         
         if auth_header.startswith("Basic "):
-            import base64
             try:
                 credentials = base64.b64decode(auth_header[6:]).decode('utf-8')
                 if ":" in credentials:
                     username, password = credentials.split(":", 1)
                     if self.admin_token and compare_digest(password, self.admin_token):
                         logger.debug("Admin authenticated via Basic Auth")
+                        # Log successful admin authentication
+                        audit_logger.auth_attempt(
+                            success=True,
+                            auth_type="admin_basic",
+                            details={"username": username, "test_mode": self.test_mode},
+                            request=request
+                        )
                         return
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Basic Auth parsing failed: {e}")
+        
+        # Log failed admin authentication attempt
+        audit_logger.auth_attempt(
+            success=False,
+            auth_type="admin_basic", 
+            details={"reason": "invalid_credentials", "test_mode": self.test_mode},
+            request=request
+        )
         
         # Authentication failed - prompt for Basic Auth
         realm_msg = "dcmon Admin (test mode: use any username + dev_admin_token_12345)" if self.test_mode else "dcmon Admin"
@@ -60,7 +77,14 @@ class AuthDependencies:
         """Authenticate client by token and return Client object."""
         token = creds.credentials
         client = Client.get_by_token(token)
+        
         if not client:
+            # Log failed client authentication
             logger.warning(f"Client authentication failed with token: {token[:8]}...")
+            # Note: We don't have request context here due to FastAPI dependency structure
+            # Consider adding request context if needed for IP tracking
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid client token")
+        
+        # Successful client auth - could log if needed, but might be too verbose
+        # audit_logger.auth_attempt(success=True, auth_type="client_bearer", details={"client_id": client.id})
         return client
