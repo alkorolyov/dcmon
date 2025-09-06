@@ -199,8 +199,7 @@ class MetricsExporter(ABC):
         self.logger = logger
         
         # Log availability status
-        if self.available:
-        else:
+        if not self.available:
             self.logger.info(f"{self.name} metrics disabled - not available")
     
     def is_available(self) -> bool:
