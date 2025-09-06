@@ -97,13 +97,13 @@ def is_ipmicfg_available() -> bool:
     
     # Test if ipmicfg command works
     try:
-        logger.debug("Testing ipmicfg -help command...")
+        logger.debug("Testing ipmicfg -ver command...")
         result = subprocess.run(
-            ["ipmicfg", "-help"],
+            ["ipmicfg", "-ver"],
             capture_output=True,
             timeout=1
         )
-        logger.debug(f"ipmicfg -help exit code: {result.returncode}")
+        logger.debug(f"ipmicfg -ver exit code: {result.returncode}")
         logger.debug(f"stdout length: {len(result.stdout)} bytes")
         logger.debug(f"stderr length: {len(result.stderr)} bytes")
         
