@@ -1001,9 +1001,9 @@ class IpmicfgPsuExporter(MetricsExporter):
             return []
         
         try:
-            # Run ipmicfg -psu to get PSU information
+            # Run ipmicfg -pminfo to get PSU information
             proc = await asyncio.create_subprocess_exec(
-                "ipmicfg", "-psu",
+                "ipmicfg", "-pminfo",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -1011,20 +1011,20 @@ class IpmicfgPsuExporter(MetricsExporter):
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
             
             if proc.returncode != 0:
-                self.logger.error(f"ipmicfg -psu failed: {stderr.decode()}")
+                self.logger.error(f"ipmicfg -pminfo failed: {stderr.decode()}")
                 return []
             
             return self._parse_psu_output(stdout.decode())
             
         except asyncio.TimeoutError:
-            self.logger.error("ipmicfg -psu command timeout")
+            self.logger.error("ipmicfg -pminfo command timeout")
             return []
         except Exception as e:
             self.logger.error(f"ipmicfg PSU collection error: {e}")
             return []
     
     def _parse_psu_output(self, output: str) -> List[MetricPoint]:
-        """Parse ipmicfg -psu output into metrics"""
+        """Parse ipmicfg -pminfo output into metrics"""
         metrics = []
         current_psu = None
         current_data = {}
@@ -1033,18 +1033,23 @@ class IpmicfgPsuExporter(MetricsExporter):
             line = line.strip()
             
             # Skip empty lines and headers
-            if not line or line.startswith('=') or line.startswith('Item') or line.startswith('----'):
+            if not line or line.startswith('Item') or line.startswith('----'):
                 continue
             
-            # Detect PSU section headers (e.g., "PSU1 Information")
-            if 'PSU' in line and 'Information' in line:
+            # Detect PSU section headers (e.g., "[SlaveAddress = 78h] [Module 1]")
+            if '[Module' in line and ']' in line:
                 # Save previous PSU data if exists
                 if current_psu and current_data:
                     metrics.extend(self._create_psu_metrics(current_psu, current_data))
                 
-                # Extract PSU number (PSU1 -> PSU1, PSU2 -> PSU2, etc.)
-                current_psu = line.split()[0]  # Extract "PSU1" from "PSU1 Information"
-                current_data = {}
+                # Extract module number and convert to PSU format
+                # "[SlaveAddress = 78h] [Module 1]" -> "PSU1"
+                import re
+                match = re.search(r'\[Module (\d+)\]', line)
+                if match:
+                    module_num = match.group(1)
+                    current_psu = f"PSU{module_num}"
+                    current_data = {}
                 continue
             
             # Parse key-value pairs
@@ -1076,30 +1081,44 @@ class IpmicfgPsuExporter(MetricsExporter):
             except (ValueError, TypeError):
                 return default
         
+        # Helper to extract temperature (handle "25C/77F" format)
+        def get_temperature(key: str, default: int = 0) -> int:
+            value = data.get(key, "").strip()
+            try:
+                # Extract Celsius part from "25C/77F" format
+                if 'C/' in value:
+                    celsius_str = value.split('C/')[0]
+                    return int(celsius_str)
+                else:
+                    return get_numeric(key, default)
+            except (ValueError, TypeError):
+                return default
+        
         # Extract power metrics (watts)
         input_power = get_numeric("Input Power")
         if input_power > 0:
             metrics.append(MetricPoint("psu_input_power_watts", input_power, labels))
         
-        output_power = get_numeric("Output Power") 
+        # Note: Field name is "Main Output Power" in pminfo output
+        output_power = get_numeric("Main Output Power") 
         if output_power > 0:
             metrics.append(MetricPoint("psu_output_power_watts", output_power, labels))
         
-        # Extract temperature metrics (celsius)
-        temp1 = get_numeric("Temperature 1")
+        # Extract temperature metrics (celsius) - handle "25C/77F" format
+        temp1 = get_temperature("Temperature 1")
         if temp1 > 0:
             metrics.append(MetricPoint("psu_temp1_celsius", temp1, labels))
             
-        temp2 = get_numeric("Temperature 2")
+        temp2 = get_temperature("Temperature 2")
         if temp2 > 0:
             metrics.append(MetricPoint("psu_temp2_celsius", temp2, labels))
         
-        # Extract fan metrics (RPM)
-        fan1_rpm = get_numeric("Fan Speed 1")
+        # Extract fan metrics (RPM) - note field names are "Fan 1", "Fan 2" in pminfo
+        fan1_rpm = get_numeric("Fan 1")
         if fan1_rpm > 0:
             metrics.append(MetricPoint("psu_fan1_rpm", fan1_rpm, labels))
             
-        fan2_rpm = get_numeric("Fan Speed 2") 
+        fan2_rpm = get_numeric("Fan 2") 
         if fan2_rpm > 0:
             metrics.append(MetricPoint("psu_fan2_rpm", fan2_rpm, labels))
         
