@@ -9,4 +9,5 @@ exporters:
   nvme: true
   nvsmi: true
   bmc_fan: true
+  ipmicfg_psu: true
 log_level: "DEBUG"
