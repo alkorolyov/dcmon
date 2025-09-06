@@ -108,8 +108,39 @@ def is_ipmicfg_available() -> bool:
         logger.debug(f"stderr length: {len(result.stderr)} bytes")
         
         available = result.returncode == 0
-        logger.debug(f"ipmicfg availability: {'PASS' if available else 'FAIL'}")
-        return available
+        if not available:
+            logger.debug(f"ipmicfg availability: FAIL")
+            return False
+            
+        # Also check if PSU module is actually present
+        logger.debug("Testing ipmicfg -pminfo for PSU presence...")
+        try:
+            psu_result = subprocess.run(
+                ["ipmicfg", "-pminfo"],
+                capture_output=True,
+                timeout=2
+            )
+            logger.debug(f"ipmicfg -pminfo exit code: {psu_result.returncode}")
+            
+            if psu_result.returncode != 0:
+                stderr_text = psu_result.stderr.decode(errors="ignore").strip()
+                logger.debug(f"PSU check failed: {stderr_text}")
+                logger.debug("ipmicfg availability: FAIL - no PSU module detected")
+                return False
+                
+            # Check if output contains actual PSU data
+            stdout_text = psu_result.stdout.decode(errors="ignore").strip()
+            if "[Module 1]" not in stdout_text:
+                logger.debug("ipmicfg availability: FAIL - no PSU modules in output")
+                return False
+                
+            logger.debug("ipmicfg availability: PASS - PSU module detected")
+            return True
+            
+        except (subprocess.TimeoutExpired, Exception) as e:
+            logger.debug(f"PSU check failed with exception: {e}")
+            logger.debug("ipmicfg availability: FAIL - PSU check exception")
+            return False
         
     except FileNotFoundError as e:
         logger.debug(f"ipmicfg availability: FAILED - FileNotFoundError: {e}")
