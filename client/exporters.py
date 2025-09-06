@@ -84,20 +84,41 @@ def is_ipmicfg_available() -> bool:
     """
     import os
     import subprocess
+    import logging
+    
+    logger = logging.getLogger("exporters.ipmicfg_debug")
     
     # Check if we have root privileges (required for PSU monitoring)
-    if os.geteuid() != 0:
+    current_uid = os.geteuid()
+    logger.debug(f"Current UID: {current_uid} (root check: {'PASS' if current_uid == 0 else 'FAIL'})")
+    if current_uid != 0:
+        logger.debug("ipmicfg availability: FAILED - not running as root")
         return False
     
     # Test if ipmicfg command works
     try:
+        logger.debug("Testing ipmicfg -help command...")
         result = subprocess.run(
             ["ipmicfg", "-help"],
             capture_output=True,
             timeout=1
         )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        logger.debug(f"ipmicfg -help exit code: {result.returncode}")
+        logger.debug(f"stdout length: {len(result.stdout)} bytes")
+        logger.debug(f"stderr length: {len(result.stderr)} bytes")
+        
+        available = result.returncode == 0
+        logger.debug(f"ipmicfg availability: {'PASS' if available else 'FAIL'}")
+        return available
+        
+    except FileNotFoundError as e:
+        logger.debug(f"ipmicfg availability: FAILED - FileNotFoundError: {e}")
+        return False
+    except subprocess.TimeoutExpired as e:
+        logger.debug(f"ipmicfg availability: FAILED - TimeoutExpired: {e}")
+        return False
+    except Exception as e:
+        logger.debug(f"ipmicfg availability: FAILED - Unexpected error: {e}")
         return False
 
 
