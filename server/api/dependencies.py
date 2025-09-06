@@ -73,18 +73,29 @@ class AuthDependencies:
             headers={"WWW-Authenticate": f"Basic realm=\"{realm_msg}\""}
         )
     
-    def require_client_auth(self, creds: HTTPAuthorizationCredentials = Depends(security)) -> Client:
+    def require_client_auth(self, request: Request, creds: HTTPAuthorizationCredentials = Depends(security)) -> Client:
         """Authenticate client by token and return Client object."""
         token = creds.credentials
         client = Client.get_by_token(token)
         
         if not client:
-            # Log failed client authentication
+            # Log failed client authentication to audit system
+            audit_logger.auth_attempt(
+                success=False,
+                auth_type="client_bearer", 
+                details={"token_prefix": token[:8], "endpoint": str(request.url)},
+                request=request
+            )
             logger.warning(f"Client authentication failed with token: {token[:8]}...")
-            # Note: We don't have request context here due to FastAPI dependency structure
-            # Consider adding request context if needed for IP tracking
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid client token")
         
-        # Successful client auth - could log if needed, but might be too verbose
-        # audit_logger.auth_attempt(success=True, auth_type="client_bearer", details={"client_id": client.id})
+        # Log successful client auth (less verbose, just for security monitoring)
+        if logger.isEnabledFor(logging.DEBUG):
+            audit_logger.auth_attempt(
+                success=True, 
+                auth_type="client_bearer",
+                details={"client_id": client.id, "hostname": client.hostname, "endpoint": str(request.url)},
+                request=request
+            )
+        
         return client
