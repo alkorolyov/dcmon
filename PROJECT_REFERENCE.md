@@ -35,16 +35,26 @@
 client/
 ├── client.py          # Main client (stdlib only, YAML config)
 ├── auth.py           # RSA authentication
-├── exporters.py      # Metrics collection
-└── fans.py           # Supermicro IPMI fan control
+├── exporters.py      # Metrics collection (OS, IPMI, GPU, NVMe, PSU)
+├── fans.py           # Supermicro IPMI fan control
+├── uninstall.py      # Client uninstaller script
+├── install.sh        # Client installation script
+├── uninstall.sh      # Client uninstallation script
+└── config*.yaml      # Configuration files (production + test)
 
 server/
 ├── main.py           # Entry point only (58 lines)
 ├── models.py         # Peewee ORM models
 ├── auth.py          # Authentication service
+├── install.sh        # Server installation script
+├── uninstall.sh      # Server uninstallation script
+├── config*.yaml      # Configuration files (production + test)
+├── dcmon.db          # SQLite database (generated)
+├── audit.log         # Security audit log (generated)
 ├── core/
 │   ├── config.py     # Configuration management
-│   └── server.py     # FastAPI app factory & lifespan
+│   ├── server.py     # FastAPI app factory & lifespan
+│   └── audit.py      # Security audit logging system
 ├── api/
 │   ├── dependencies.py         # Auth dependencies
 │   ├── schemas.py              # Pydantic models
@@ -61,12 +71,15 @@ server/
 │   └── certificate_manager.py # SSL/TLS handling
 ├── ui/               # Component-based frontend with fail-fast architecture
 │   ├── components/   # Modular UI components
-│   │   ├── charts/   # Chart system (ChartManager singleton, TimeSeriesChart)
-│   │   ├── controls/ # Dashboard controls (auto-refresh, time ranges)
-│   │   └── tables/   # Data tables (clients_table with HTMX integration)
-│   ├── pages/        # Main templates (dashboard.html, base.html)
+│   │   ├── charts/   # Chart system (chart_manager.js, timeseries_chart.js, styles)
+│   │   ├── controls/ # Dashboard controls (auto-refresh, time ranges, JS + CSS)
+│   │   └── tables/   # Data tables (clients_table.html/.js, HTMX integration)
+│   ├── pages/        # Main templates (dashboard.html, base.html)  
 │   ├── scripts/      # Utilities (ApiClient class)
-│   └── styles/       # Design system (CSS variables, dark mode)
+│   └── styles/       # Design system (variables.css, dark mode)
+├── static/           # Static asset serving
+│   ├── js/           # JavaScript files
+│   └── css/          # CSS stylesheets
 └── dashboard/        # Dashboard logic
     ├── controller.py # Data processing with centralized operations
     └── config.py     # Metric thresholds
@@ -76,22 +89,34 @@ server/
 - `POST /api/clients/register` - RSA key registration
 - `POST /api/metrics` - Metric submission
 - `GET /api/commands/{client_id}` - Command polling
-- `POST /api/commands` - Admin command creation
+- `POST /api/commands` - Admin command creation  
+- `POST /api/command-results` - Command result submission
 - `GET /api/timeseries/{metric_name}` - Time series data (optimized format)
 - `GET /dashboard` - Web dashboard with smart caching
 - `GET /dashboard/refresh/clients` - HTMX table refresh endpoint
+- `GET /health` - Health check endpoint (admin auth required)
 
 **Fan Control (Supermicro H11/H12/X11/X12):**
 - IPMI commands: `0x30 0x45` (BMC mode), `0x30 0x70 0x66` (zone speeds)
 - Remote control via command queue system
 - Standard/Full Speed/Optimal/Heavy I/O modes
 
-**Metrics Collection (~50 metrics/client):**
+**PSU Monitoring (Supermicro ipmicfg):**
+- Metrics: Input/output power (watts), temperatures, fan RPMs, status codes
+- Command: `ipmicfg -pminfo` (requires root privileges and Supermicro hardware)
+- Parsing: "[Module 1]" → "PSU1" labels, temperature format "25C/77F" → 25°C
+- Enhanced availability check: `ipmicfg -ver` + `ipmicfg -pminfo` to verify actual PSU presence
+- Intelligent detection: Disables exporter if no PSU modules detected (prevents constant errors)
+- Raw storage: 7 integer metrics per PSU (psu_input_power_watts, psu_output_power_watts, psu_temp1_celsius, psu_temp2_celsius, psu_fan1_rpm, psu_fan2_rpm, psu_status)  
+- Status mapping: OK=0, Warning=1, Critical=2, Unknown=3
+
+**Metrics Collection (~57 metrics/client):**
 - OS: CPU, RAM, disk, network (stdlib /proc parsing)
 - IPMI: Temperature, fan RPM, power sensors (requires root)
 - GPU: NVIDIA temp, power, utilization via nvidia-smi
 - APT: Package updates, reboot status
 - NVMe: Drive health, wear percentage
+- PSU: Power consumption, temperature, fan RPM, status (ipmicfg -pminfo, Supermicro only)
 
 ## Metrics Query Architecture (Centralized)
 
@@ -152,22 +177,31 @@ TABLE_COLUMNS = [
 - Smart caching: Incremental queries (~3 records) vs full queries (~60k records)
 - Layout: Header (Total, Online, Time range, Refresh) + Critical Health table
 
+**Security & Audit:**
+- Centralized audit logging system (`core/audit.py`) for authentication attempts
+- Structured JSON audit logs written to `audit.log` 
+- Failed authentication attempts logged with client token prefixes
+- Admin authentication tracking for security monitoring
+
 **Error Handling:**
 - Stack traces enabled with `exc_info=True` for debugging
 - Fail-fast architecture with clear error messages
 - No defensive programming - explicit error propagation
+- Clean client startup logging (reduced debug verbosity, essential INFO only)
 
 ## Installation & Operations
 
 **Installation:**
-- Server: `sudo bash install.sh` (creates dcmon-server user, systemd service)
-- Client: `sudo bash install.sh` (auto-registration with admin token prompt)
+- Server: `sudo bash install.sh` (creates dcmon-server user, systemd service, SSL certs)
+- Client: `sudo bash install.sh` (auto-registration with admin token prompt)  
+- Uninstallation: `sudo bash uninstall.sh` or `sudo python3 uninstall.py` (client)
 - Idempotent with smart state detection (0=operational, 1=needs registration, 2=fresh install)
 
 **Configuration:**
-- Server: `/etc/dcmon-server/config.yaml`
-- Client: `/etc/dcmon/config.yaml`
+- Server: `/etc/dcmon-server/config.yaml` (+ `config_test.yaml` for dev)
+- Client: `/etc/dcmon/config.yaml` (+ `config_test.yaml` for dev)  
 - Security files in auth_dir: admin_token, server.{crt,key}, client_token
+- Generated files: dcmon.db (SQLite), audit.log (security events)
 
 **Operations:**
 - Services: `systemctl {start|stop|status} dcmon-{server|client}`
