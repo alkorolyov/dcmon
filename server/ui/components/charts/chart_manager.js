@@ -122,6 +122,7 @@ class ChartManager {
                 },
                 {
                     // Y-axis (no label - title has the info)
+                    size: 70,        // Increased from default to fit labels like "6000RPM"
                     stroke: "#6e7680",
                     grid: { stroke: "#dcdee1", width: 1 },
                     ticks: { stroke: "#6e7680", width: 1 },

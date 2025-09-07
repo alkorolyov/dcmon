@@ -175,6 +175,7 @@ TABLE_COLUMNS = [
 - Professional design system with CSS variables, dark mode support
 - Chart system: ChartManager singleton with persistent cache + TimeSeriesChart factory
 - Smart caching: Incremental queries (~3 records) vs full queries (~60k records)
+- **Time Range Selector**: 13 ranges (5m-90d) with intelligent cache filtering and axis rescaling
 - Layout: Header (Total, Online, Time range, Refresh) + Critical Health table
 
 **Security & Audit:**
@@ -230,4 +231,6 @@ TABLE_COLUMNS = [
 - **Backend**: Pandas vectorized operations, centralized metric queries
 - **Data Pipeline**: Backend simple format, frontend uPlot conversion (88% faster)
 - **Query Strategy**: Initial load (full 24h), auto-refresh (incremental), manual refresh (force full)
+- **Time Range Performance**: Cached data filtering with axis rescaling (no database queries on range changes)
+- **API Design**: Integer seconds parameter (300s-7776000s) instead of fractional hours for precision
 - **Architecture**: Fail-fast design, operation-based metrics, centralized processing

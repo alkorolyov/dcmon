@@ -176,7 +176,7 @@ class TimeSeriesChart {
         return new TimeSeriesChart(containerId, ['psu_fan1_rpm', 'psu_fan2_rpm'], {
             title: 'PSU Fan Speed',
             yLabel: 'Fan Speed',
-            unit: ' RPM',
+            unit: 'RPM',
             aggregation: 'max'
         });
     }
