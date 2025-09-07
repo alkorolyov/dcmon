@@ -7,8 +7,8 @@
 
 // Chart configuration constants - Single source of truth for UI dimensions
 const CHART_DEFAULTS = {
-    PLOT_HEIGHT: 150,      // Actual plot area height
-    LEGEND_HEIGHT: 25,     // Reduced space for legend (single-line x-labels)
+    PLOT_HEIGHT: 200,      // Actual plot area height (compact size for efficient dashboard layout)
+    LEGEND_HEIGHT: 32,     // Space for legend (optimized with uPlot axis configuration + increased bottom padding)
     TITLE_HEIGHT: 18,      // Small space for title above plot
     PADDING: 6,           // Reduced container padding
     get TOTAL_HEIGHT() {   // Total container height (title + plot + legend)
@@ -105,10 +105,12 @@ class ChartManager {
             },
             axes: [
                 {
-                    // X-axis (time) - Grafana-style time-only labels
+                    // X-axis (time) - Optimized spacing with Grafana-style time-only labels
+                    size: 20,        // Reduce axis area from default ~25px to 20px
+                    gap: 2,          // Small gap between axis labels and axis line
+                    ticks: { size: 0 }, // Remove tick marks for cleaner look and space saving
                     stroke: "#6e7680",
                     grid: { stroke: "#dcdee1", width: 1 },
-                    ticks: { stroke: "#6e7680", width: 1 },
                     values: (u, vals) => vals.map(v => {
                         const date = new Date(v * 1000);
                         return date.toLocaleTimeString('en-US', { 
@@ -588,13 +590,75 @@ class ChartManager {
     /**
      * Update time range for all charts with smart query optimization
      */
-    updateTimeRange(hours) {
-        console.log(`Updating time range to ${hours} hours for all charts`);
-        const timeRange = { hours };
+    updateTimeRange(seconds) {
+        console.log(`Updating time range to ${this.formatSecondsHuman(seconds)} for all charts`);
         
         for (const chartId of this.charts.keys()) {
-            this.loadChartData(chartId, { timeRange });
+            const chartInfo = this.charts.get(chartId);
+            
+            // Update chart config with new seconds
+            chartInfo.config.apiParams.seconds = seconds;
+            
+            // Debug what we have
+            console.log(`Chart ${chartId}: cachedData=${!!chartInfo.cachedData}, uplotInstance=${!!chartInfo.chart}`);
+            
+            // Try cached filtering first, fallback to API call
+            if (chartInfo.cachedData && chartInfo.chart) {
+                console.log(`Using cached data for ${chartId}`);
+                this.filterAndRenderCachedData(chartId, chartInfo, seconds);
+            } else {
+                console.log(`Loading fresh data for ${chartId}`);
+                this.loadChartData(chartId, { type: 'full', timeRange: { seconds } });
+            }
         }
+    }
+    
+    /**
+     * Format seconds to human readable format
+     */
+    formatSecondsHuman(seconds) {
+        if (seconds < 3600) {
+            return `${seconds / 60} min`;
+        } else if (seconds < 86400) {
+            return `${seconds / 3600} hours`;
+        } else {
+            return `${seconds / 86400} days`;
+        }
+    }
+    
+    /**
+     * Filter cached data to new time range and re-render chart
+     */
+    filterAndRenderCachedData(chartId, chartInfo, seconds) {
+        const now = Math.floor(Date.now() / 1000);
+        const startTime = now - seconds;
+        
+        // Always filter from original full cached data, not previously filtered data
+        const filteredData = { 
+            ...chartInfo.cachedData,
+            data: {}
+        };
+        
+        Object.keys(chartInfo.cachedData.data).forEach(clientId => {
+            filteredData.data[clientId] = chartInfo.cachedData.data[clientId].filter(
+                point => point.timestamp >= startTime
+            );
+        });
+        
+        console.log(`Filtered from ${Object.values(chartInfo.cachedData.data).reduce((sum, arr) => sum + arr.length, 0)} to ${Object.values(filteredData.data).reduce((sum, arr) => sum + arr.length, 0)} points`);
+        
+        // Convert and re-render chart
+        const uplotData = this.prepareUplotData(filteredData);
+        chartInfo.chart.setData(uplotData.data);
+        
+        // Force x-axis to rescale to new time range
+        if (uplotData.data[0] && uplotData.data[0].length > 0) {
+            const minTime = Math.min(...uplotData.data[0]);
+            const maxTime = Math.max(...uplotData.data[0]);
+            chartInfo.chart.setScale('x', { min: minTime, max: maxTime });
+        }
+        
+        console.log(`Chart ${chartId} re-rendered with filtered data for ${seconds} seconds`);
     }
     
     /**

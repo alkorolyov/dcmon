@@ -67,7 +67,7 @@
 .u-legend {
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     font-size: 12px;
-    margin-top: 4px;
+    margin-top: 0;
     max-width: 100%;
     max-height: var(--chart-legend-height);
     overflow: hidden;
@@ -148,6 +148,11 @@
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     font-size: 11px;
     color: var(--text-secondary);
+}
+
+/* Move X-axis labels closer to plot */
+.u-axis.u-off.u-bottom {
+    margin-top: -4px;
 }
 
 /* Optimized Plot Area */

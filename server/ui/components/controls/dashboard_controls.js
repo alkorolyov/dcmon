@@ -8,7 +8,7 @@ class DashboardControls {
     constructor() {
         this.refreshInterval = null;
         this.currentRefreshRate = 30; // seconds
-        this.currentTimeRange = '24h';
+        this.currentTimeRange = '1d';
         this.activeDropdown = null;
         
         this.initialize();
@@ -347,13 +347,11 @@ class DashboardControls {
      * Refresh charts with new time range
      */
     refreshChartsWithTimeRange(range) {
-        // Convert range to hours for API
-        const hours = this.parseTimeRangeToHours(range);
+        // Convert range to seconds for API
+        const seconds = this.parseTimeRangeToSeconds(range);
         
         // Update time range with smart caching
-        if (window.chartManager) {
-            window.chartManager.updateTimeRange(hours);
-        }
+        window.chartManager.updateTimeRange(seconds);
     }
     
     /**
@@ -366,27 +364,34 @@ class DashboardControls {
     
     formatTimeRange(range) {
         const rangeMap = {
+            '5m': 'Last 5 minutes',
+            '15m': 'Last 15 minutes',
+            '30m': 'Last 30 minutes',
             '1h': 'Last hour',
-            '6h': 'Last 6 hours', 
-            '24h': 'Last day',
+            '3h': 'Last 3 hours',
+            '6h': 'Last 6 hours',
+            '12h': 'Last 12 hours',
+            '1d': 'Last day',
+            '2d': 'Last 2 days',
             '7d': 'Last week',
-            '30d': 'Last month'
+            '30d': 'Last month',
+            '90d': 'Last 3 months'
         };
         return rangeMap[range] || range;
     }
     
-    parseTimeRangeToHours(range) {
+    parseTimeRangeToSeconds(range) {
         const match = range.match(/^(\d+)([hmd])$/);
-        if (!match) return 24;
+        if (!match) return 86400; // Default to 24 hours = 86400 seconds
         
         const [, value, unit] = match;
         const num = parseInt(value);
         
         switch (unit) {
-            case 'h': return num;
-            case 'd': return num * 24;
-            case 'm': return Math.max(1, Math.round(num / 60));
-            default: return 24;
+            case 'm': return num * 60;      // minutes to seconds
+            case 'h': return num * 3600;    // hours to seconds  
+            case 'd': return num * 86400;   // days to seconds
+            default: return 86400;
         }
     }
     

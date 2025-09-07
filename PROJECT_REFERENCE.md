@@ -183,10 +183,12 @@ TABLE_COLUMNS = [
 - Failed authentication attempts logged with client token prefixes
 - Admin authentication tracking for security monitoring
 
-**Error Handling:**
-- Stack traces enabled with `exc_info=True` for debugging
-- Fail-fast architecture with clear error messages
-- No defensive programming - explicit error propagation
+**Error Handling & Design Philosophy:**
+- **Fail-Fast Architecture**: Explicit error propagation instead of defensive programming
+- **No Protective Fallbacks**: Code fails immediately when preconditions aren't met
+- **Clear Error Messages**: Stack traces enabled with `exc_info=True` for debugging
+- **Precondition Checks**: Valid checks (e.g., `if (!this.chartManager) throw new Error()`) but no fallback defaults
+- **Explicit Dependencies**: Components assume required dependencies exist rather than checking and falling back
 - Clean client startup logging (reduced debug verbosity, essential INFO only)
 
 **UI Design Principles:**

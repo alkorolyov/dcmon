@@ -9,7 +9,7 @@ class TimeSeriesChart {
         this.containerId = containerId;
         this.metricName = metricName;
         this.options = {
-            hours: 24,
+            seconds: this.getGlobalTimeRange(),
             aggregation: 'max',
             title: options.title || `${metricName} Over Time`,
             yLabel: options.yLabel || 'Value',
@@ -21,6 +21,13 @@ class TimeSeriesChart {
     }
     
     /**
+     * Get global time range from dashboard controls
+     */
+    getGlobalTimeRange() {
+        return window.dashboardControls.parseTimeRangeToSeconds(window.dashboardControls.currentTimeRange);
+    }
+    
+    /**
      * Initialize the chart with optimized settings
      */
     initialize() {
@@ -29,13 +36,18 @@ class TimeSeriesChart {
         }
         
         // Get or create chart with cache preservation
+        // Handle both single metric name and array of metric names
+        const metricNameParam = Array.isArray(this.metricName) 
+            ? this.metricName.join(',') 
+            : this.metricName;
+            
         this.chartManager.getOrCreateChart(this.containerId, {
             title: this.options.title,
             yLabel: this.options.yLabel,
             unit: this.options.unit,
-            apiEndpoint: `/api/timeseries/${this.metricName}`,
+            apiEndpoint: `/api/timeseries/${metricNameParam}`,
             apiParams: {
-                hours: this.options.hours,
+                seconds: this.options.seconds,
                 aggregation: this.options.aggregation,
                 ...(this.options.sensor && { sensor: this.options.sensor })
             }
@@ -49,10 +61,7 @@ class TimeSeriesChart {
      * Refresh the chart data
      */
     refresh() {
-        const chartInfo = this.chartManager.getChartInfo(this.containerId);
-        if (chartInfo) {
-            this.chartManager.loadChartData(this.containerId);
-        }
+        this.chartManager.loadChartData(this.containerId);
     }
     
     /**
@@ -61,26 +70,21 @@ class TimeSeriesChart {
     updateParams(newParams) {
         this.options = { ...this.options, ...newParams };
         
-        // Get current chart info and update config
+        // Update chart config and reload
         const chartInfo = this.chartManager.getChartInfo(this.containerId);
-        if (chartInfo) {
-            chartInfo.config.apiParams = {
-                hours: this.options.hours,
-                aggregation: this.options.aggregation
-            };
-            
-            // Reload with new parameters
-            this.chartManager.loadChartData(this.containerId);
-        }
+        chartInfo.config.apiParams = {
+            seconds: this.options.seconds,
+            aggregation: this.options.aggregation
+        };
+        
+        this.chartManager.loadChartData(this.containerId);
     }
     
     /**
      * Destroy the chart
      */
     destroy() {
-        if (this.chartManager) {
-            this.chartManager.destroyChart(this.containerId);
-        }
+        this.chartManager.destroyChart(this.containerId);
     }
     
     /**
@@ -138,6 +142,42 @@ class TimeSeriesChart {
             yLabel: 'Usage',
             unit: '%',
             aggregation: 'avg'
+        });
+    }
+    
+    static createGpuFanChart(containerId) {
+        return new TimeSeriesChart(containerId, 'gpu_fan_speed', {
+            title: 'GPU Fan Speed',
+            yLabel: 'Fan Speed',
+            unit: '%',
+            aggregation: 'max'
+        });
+    }
+    
+    static createPsuTempChart(containerId) {
+        return new TimeSeriesChart(containerId, ['psu_temp1_celsius', 'psu_temp2_celsius'], {
+            title: 'PSU Temperature',
+            yLabel: 'Temperature',
+            unit: '°C',
+            aggregation: 'max'
+        });
+    }
+    
+    static createPsuPowerChart(containerId) {
+        return new TimeSeriesChart(containerId, 'psu_input_power_watts', {
+            title: 'PSU Power',
+            yLabel: 'Power',
+            unit: 'W',
+            aggregation: 'sum'
+        });
+    }
+    
+    static createPsuFanChart(containerId) {
+        return new TimeSeriesChart(containerId, ['psu_fan1_rpm', 'psu_fan2_rpm'], {
+            title: 'PSU Fan Speed',
+            yLabel: 'Fan Speed',
+            unit: ' RPM',
+            aggregation: 'max'
         });
     }
 }

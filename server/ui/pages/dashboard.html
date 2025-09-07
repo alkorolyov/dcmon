@@ -46,11 +46,20 @@
                     <span class="dropdown-text">Last day</span>
                 </button>
                 <div class="dropdown-menu" id="timerange-dropdown">
-                    <button class="dropdown-item active" data-value="24h">Last day</button>
-                    <button class="dropdown-item" data-value="6h">Last 6 hours</button>
+                    <button class="dropdown-item" data-value="5m">Last 5 minutes</button>
+                    <button class="dropdown-item" data-value="15m">Last 15 minutes</button>
+                    <button class="dropdown-item" data-value="30m">Last 30 minutes</button>
                     <button class="dropdown-item" data-value="1h">Last hour</button>
+                    <button class="dropdown-item" data-value="3h">Last 3 hours</button>
+                    <button class="dropdown-item" data-value="6h">Last 6 hours</button>
+                    <button class="dropdown-item" data-value="12h">Last 12 hours</button>
+                    <button class="dropdown-item active" data-value="1d">Last day</button>
+                    <button class="dropdown-item" data-value="2d">Last 2 days</button>
                     <div class="dropdown-divider"></div>
                     <button class="dropdown-item" data-value="7d">Last week</button>
+                    <button class="dropdown-item" data-value="30d">Last month</button>
+                    <button class="dropdown-item" data-value="90d">Last 3 months</button>
+                    <div class="dropdown-divider"></div>
                     <button class="dropdown-item" data-value="custom">Custom range</button>
                 </div>
             </div>
@@ -112,6 +121,26 @@
                 
                 <!-- CPU Usage Chart -->
                 {% with chart_id='cpu-usage-chart', chart_title='CPU Usage' %}
+                    {% include "charts/chart_container.html" %}
+                {% endwith %}
+                
+                <!-- GPU Fan Chart -->
+                {% with chart_id='gpu-fan-chart', chart_title='GPU Fan Speed' %}
+                    {% include "charts/chart_container.html" %}
+                {% endwith %}
+                
+                <!-- PSU Temperature Chart -->
+                {% with chart_id='psu-temp-chart', chart_title='PSU Temperature' %}
+                    {% include "charts/chart_container.html" %}
+                {% endwith %}
+                
+                <!-- PSU Power Chart -->
+                {% with chart_id='psu-power-chart', chart_title='PSU Power' %}
+                    {% include "charts/chart_container.html" %}
+                {% endwith %}
+                
+                <!-- PSU Fan Chart -->
+                {% with chart_id='psu-fan-chart', chart_title='PSU Fan Speed' %}
                     {% include "charts/chart_container.html" %}
                 {% endwith %}
             </div>
@@ -181,12 +210,32 @@
         const cpuUsageChart = TimeSeriesChart.createCpuUsageChart('cpu-usage-chart');
         cpuUsageChart.initialize();
         
+        // GPU Fan Chart
+        const gpuFanChart = TimeSeriesChart.createGpuFanChart('gpu-fan-chart');
+        gpuFanChart.initialize();
+        
+        // PSU Temperature Chart
+        const psuTempChart = TimeSeriesChart.createPsuTempChart('psu-temp-chart');
+        psuTempChart.initialize();
+        
+        // PSU Power Chart
+        const psuPowerChart = TimeSeriesChart.createPsuPowerChart('psu-power-chart');
+        psuPowerChart.initialize();
+        
+        // PSU Fan Chart
+        const psuFanChart = TimeSeriesChart.createPsuFanChart('psu-fan-chart');
+        psuFanChart.initialize();
+        
         // Store chart references globally for controls
         window.dashboardCharts = {
             gpuTemp: gpuTempChart,
             cpuTemp: cpuTempChart,
             memory: memoryChart,
-            cpuUsage: cpuUsageChart
+            cpuUsage: cpuUsageChart,
+            gpuFan: gpuFanChart,
+            psuTemp: psuTempChart,
+            psuPower: psuPowerChart,
+            psuFan: psuFanChart
         };
         
         console.log('All charts initialized');

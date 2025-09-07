@@ -153,7 +153,7 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
     @router.get("/api/timeseries/{metric_name}")
     def get_timeseries(
         metric_name: str,
-        hours: int = Query(24, ge=1, le=168),  # 1 hour to 1 week
+        seconds: int = Query(86400),  # Default 24 hours = 86400 seconds
         client_ids: Optional[List[int]] = Query(None),
         active_only: bool = Query(True),  # Default to active clients only
         since_timestamp: Optional[int] = Query(None),  # For incremental queries
@@ -173,19 +173,29 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
             # Calculate time range
             end_time = int(time.time())
             
-            # Use incremental timestamps if provided, otherwise use hours range
+            # Use incremental timestamps if provided, otherwise use seconds range
             if since_timestamp is not None:
                 start_time = since_timestamp
                 if until_timestamp is not None:
                     end_time = until_timestamp
             else:
-                start_time = end_time - (hours * 3600)
+                start_time = end_time - seconds
             
-            # Get series for the requested metric with smart client filtering
+            # Get series for the requested metric(s) with smart client filtering
             series_start = time_module.time()
-            series_query = (MetricSeries.select()
-                          .join(Client)
-                          .where(MetricSeries.metric_name == metric_name))
+            
+            # Handle comma-separated metric names (e.g., "psu_temp1_celsius,psu_temp2_celsius")
+            metric_names = [name.strip() for name in metric_name.split(',')]
+            if len(metric_names) == 1:
+                # Single metric - use exact match
+                series_query = (MetricSeries.select()
+                              .join(Client)
+                              .where(MetricSeries.metric_name == metric_names[0]))
+            else:
+                # Multiple metrics - use IN clause
+                series_query = (MetricSeries.select()
+                              .join(Client)
+                              .where(MetricSeries.metric_name.in_(metric_names)))
             
             # Apply client filtering
             if client_ids:
