@@ -189,6 +189,13 @@ TABLE_COLUMNS = [
 - No defensive programming - explicit error propagation
 - Clean client startup logging (reduced debug verbosity, essential INFO only)
 
+**UI Design Principles:**
+- **Single Source of Truth for Dimensions**: JavaScript constants as authoritative source for programmatic UI components
+- CSS custom properties generated from JS constants for styling consistency
+- Avoids duplicate hardcoded values across JS/CSS files
+- **Pattern**: `const UI_CONSTANTS = { CHART_HEIGHT: 200 }; document.documentElement.style.setProperty('--chart-height', UI_CONSTANTS.CHART_HEIGHT + 'px');`
+- **Benefits**: Type safety, performance, maintainability, centralized control
+
 ## Installation & Operations
 
 **Installation:**

@@ -69,6 +69,25 @@ TABLE_COLUMNS = [
         "header": "GPU Fan%", "unit": "%", "css_class": "col-gpu-fan"
     },
     
+    # PSU metrics - power supply monitoring
+    {
+        "metric_name": ["psu_temp1_celsius", "psu_temp2_celsius"],
+        "aggregation": "max",
+        "threshold_type": "psu_temp_celsius",
+        "header": "PSU°C", "unit": "°", "css_class": "col-psu-temp"
+    },
+    {
+        "metric_name": "psu_input_power_watts",
+        "aggregation": "sum",
+        "header": "Power", "unit": "W", "css_class": "col-psu-power"
+    },
+    {
+        "metric_name": ["psu_fan1_rpm", "psu_fan2_rpm"],
+        "aggregation": "max",
+        "threshold_type": "psu_fan_rpm",
+        "header": "PSU Fan", "unit": "rpm", "css_class": "col-psu-fan"
+    },
+    
     # Usage metrics - typically single series per client
     {
         "metric_name": "cpu_usage_percent",

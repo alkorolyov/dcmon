@@ -18,8 +18,8 @@ METRIC_THRESHOLDS = {
     'cpu_load_1m': [2, 4, 8],
     
     # GPU Metrics
-    'gpu_temperature': [60, 70, 80],
-    'gpu_fan_speed': [30, 60, 80],
+    'gpu_temperature': [50, 70, 80],
+    'gpu_fan_speed': [30, 50, 80],
     'gpu_power_draw': [200, 350, 420],
     
     # Storage
@@ -29,6 +29,11 @@ METRIC_THRESHOLDS = {
     'cpu_vrm_temp': [65, 80, 95],
     'dimm_temp_avg': [45, 60, 75],
     'nvme_wear_percent': [50, 80, 90],
+    
+    # PSU Metrics
+    'psu_temp_celsius': [40, 50, 60],
+    'psu_input_power_watts': [800, 1600, 2000],
+    'psu_fan_rpm': [2000, 5000, 8000],
 }
 
 def get_metric_status(metric_name: str, value: float) -> str:

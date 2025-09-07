@@ -101,7 +101,8 @@
 .col-cpu-temp,
 .col-nvme-temp,
 .col-vrm-temp,
-.col-gpu-temp {
+.col-gpu-temp,
+.col-psu-temp {
     width: 55px;
     text-align: center;
 }
@@ -110,6 +111,17 @@
 .col-gpu-power,
 .col-gpu-limit {
     width: 65px;
+    text-align: center;
+}
+
+.col-psu-power {
+    width: 70px;  /* Slightly wider for total power values like "1200W" */
+    text-align: center;
+}
+
+/* RPM columns - for fan speed values like "3200rpm" */
+.col-psu-fan {
+    width: 70px;
     text-align: center;
 }
 

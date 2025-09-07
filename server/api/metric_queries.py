@@ -53,7 +53,7 @@ class MetricQueryBuilder:
             return base_query.where(combined_condition)
     
     @staticmethod
-    def get_latest_metric_value(client_id: int, metric_name: str, 
+    def get_latest_metric_value(client_id: int, metric_name: Union[str, List[str]], 
                                label_filters: Optional[List[Dict[str, str]]] = None,
                                aggregation: Optional[str] = None) -> Optional[float]:
         """
@@ -61,19 +61,22 @@ class MetricQueryBuilder:
         
         Args:
             client_id: Client ID
-            metric_name: Metric name (e.g., "ipmi_temp_celsius")
+            metric_name: Metric name (e.g., "ipmi_temp_celsius") or list of metric names
             label_filters: Label filters, e.g. [{"sensor": "CPU Temp"}]
             aggregation: If None, return latest timestamp value from any series.
-                        If specified ("max", "min", "avg"), aggregate across all matching series at latest timestamp.
+                        If specified ("max", "min", "avg", "sum"), aggregate across all matching series at latest timestamp.
         
         Returns:
             Latest value or None if not found
         """
         try:
-            # Base series query
+            # Handle both single metric name and list of metric names
+            metric_names = [metric_name] if isinstance(metric_name, str) else metric_name
+            
+            # Base series query for multiple metric names
             base_query = MetricSeries.select().where(
                 (MetricSeries.client == client_id) &
-                (MetricSeries.metric_name == metric_name)
+                (MetricSeries.metric_name.in_(metric_names))
             )
             
             # Apply label filtering
@@ -161,6 +164,8 @@ class MetricQueryBuilder:
                     return min(values)
                 elif aggregation == "avg":
                     return sum(values) / len(values)
+                elif aggregation == "sum":
+                    return sum(values)
                 else:
                     logger.warning(f"Unknown aggregation type: {aggregation}, using max")
                     return max(values)

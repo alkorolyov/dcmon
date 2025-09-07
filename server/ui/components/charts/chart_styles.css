@@ -20,14 +20,14 @@
     border-radius: 3px;
     padding: 0;
     width: calc(50% - 4px); /* Exactly two per row, accounting for 8px gap */
-    min-width: 400px; /* Minimum width for readability */
+    min-width: var(--chart-min-width); /* From JS constants */
     box-sizing: border-box;
 }
 
 /* Chart Content Wrapper */
 .chart-wrapper {
-    padding: 12px;
-    min-height: 300px;
+    padding: var(--chart-padding);
+    min-height: var(--chart-total-height);
     position: relative;
 }
 
@@ -35,8 +35,8 @@
 .chart-content {
     position: relative;
     width: 100%;
-    height: 300px;
-    min-height: 300px;
+    height: var(--chart-total-height);
+    min-height: var(--chart-total-height);
     display: block;
     visibility: visible;
 }
@@ -53,19 +53,30 @@
     }
 }
 
-/* uPlot Styling Overrides for Thinner Lines */
+/* uPlot Styling Overrides - Optimized Layout */
 .u-title {
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 8px;
+    margin: 0;
+    padding: 0 0 0 8px;
+    text-align: left;
 }
 
 .u-legend {
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     font-size: 12px;
-    margin-top: 8px;
+    margin-top: 4px;
+    max-width: 100%;
+    max-height: var(--chart-legend-height);
+    overflow: hidden;
+    box-sizing: border-box;
+    padding: 0 4px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    align-items: flex-start;
 }
 
 .u-legend .u-label {
@@ -84,7 +95,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 300px;
+    height: var(--chart-total-height);
     background: #f7f8fa;
     border: 1px solid #dcdee1;
     border-radius: 3px;
@@ -113,7 +124,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 300px;
+    height: var(--chart-total-height);
     color: var(--text-secondary);
     font-style: italic;
     font-size: 14px;

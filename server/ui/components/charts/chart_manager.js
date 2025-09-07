@@ -5,6 +5,27 @@
  * Optimized for two charts per row with thinner plot lines.
  */
 
+// Chart configuration constants - Single source of truth for UI dimensions
+const CHART_DEFAULTS = {
+    PLOT_HEIGHT: 150,      // Actual plot area height
+    LEGEND_HEIGHT: 25,     // Reduced space for legend (single-line x-labels)
+    TITLE_HEIGHT: 18,      // Small space for title above plot
+    PADDING: 6,           // Reduced container padding
+    get TOTAL_HEIGHT() {   // Total container height (title + plot + legend)
+        return this.PLOT_HEIGHT + this.LEGEND_HEIGHT + this.TITLE_HEIGHT;
+    },
+    MIN_WIDTH: 400        // Minimum chart width
+};
+
+// Set CSS custom properties for styling consistency
+if (typeof document !== 'undefined') {
+    document.documentElement.style.setProperty('--chart-total-height', CHART_DEFAULTS.TOTAL_HEIGHT + 'px');
+    document.documentElement.style.setProperty('--chart-plot-height', CHART_DEFAULTS.PLOT_HEIGHT + 'px');
+    document.documentElement.style.setProperty('--chart-legend-height', CHART_DEFAULTS.LEGEND_HEIGHT + 'px');
+    document.documentElement.style.setProperty('--chart-padding', CHART_DEFAULTS.PADDING + 'px');
+    document.documentElement.style.setProperty('--chart-min-width', CHART_DEFAULTS.MIN_WIDTH + 'px');
+}
+
 class ChartManager {
     constructor() {
         this.charts = new Map();
@@ -63,7 +84,7 @@ class ChartManager {
         const uplotConfig = {
             title: config.title,
             width: chartWidth,
-            height: 300, // Keep current height as requested
+            height: CHART_DEFAULTS.PLOT_HEIGHT,
             cursor: {
                 sync: {
                     key: 'timeseries-sync' // Sync cursor across all charts
@@ -84,15 +105,21 @@ class ChartManager {
             },
             axes: [
                 {
-                    // X-axis (time)
+                    // X-axis (time) - Grafana-style time-only labels
                     stroke: "#6e7680",
                     grid: { stroke: "#dcdee1", width: 1 },
-                    ticks: { stroke: "#6e7680", width: 1 }
+                    ticks: { stroke: "#6e7680", width: 1 },
+                    values: (u, vals) => vals.map(v => {
+                        const date = new Date(v * 1000);
+                        return date.toLocaleTimeString('en-US', { 
+                            hour12: false, 
+                            hour: '2-digit', 
+                            minute: '2-digit' 
+                        });
+                    })
                 },
                 {
-                    // Y-axis
-                    label: config.yLabel || "Value",
-                    labelGap: 12,
+                    // Y-axis (no label - title has the info)
                     stroke: "#6e7680",
                     grid: { stroke: "#dcdee1", width: 1 },
                     ticks: { stroke: "#6e7680", width: 1 },
