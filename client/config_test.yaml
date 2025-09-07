@@ -10,4 +10,9 @@ exporters:
   nvsmi: true
   bmc_fan: true
   ipmicfg_psu: true
+log_monitoring:
+  enabled: true
+  sources: ["dmesg", "journal"]
+  severity_filter: "WARN"
+  max_lines_per_cycle: 50
 log_level: "DEBUG"

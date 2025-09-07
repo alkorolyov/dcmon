@@ -1158,3 +1158,282 @@ class IpmicfgPsuExporter(MetricsExporter):
             metrics.append(MetricPoint("psu_status", status_value, {**labels, "status": status}))
         
         return metrics
+
+
+@dataclass
+class LogEntry:
+    """Represents a collected log entry"""
+    log_source: str  # 'dmesg', 'journal', 'syslog'
+    log_timestamp: int
+    content: str
+    severity: Optional[str] = None
+
+
+class LogExporter:
+    """
+    Incremental log collection for troubleshooting.
+    Tracks cursor positions and collects only new log entries.
+    """
+    
+    def __init__(self, auth_dir: Path, config: Optional[Dict] = None):
+        self.auth_dir = Path(auth_dir)
+        self.cursors_file = self.auth_dir / "log-cursors.json"
+        self.config = config or {}
+        self.logger = logging.getLogger("dcmon.log_exporter")
+        
+        # Load cursors on initialization
+        self.cursors = self._load_cursors()
+        
+        # Configuration
+        log_config = self.config.get('log_monitoring', {})
+        self.enabled = log_config.get('enabled', False)
+        self.max_lines_per_cycle = log_config.get('max_lines_per_cycle', 50)
+        self.severity_filter = log_config.get('severity_filter', 'WARN')
+        self.enabled_sources = log_config.get('sources', ['dmesg', 'journal'])
+    
+    def _load_cursors(self) -> Dict:
+        """Load cursor positions from persistent storage."""
+        try:
+            if self.cursors_file.exists():
+                with open(self.cursors_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            self.logger.error(f"Error loading cursors: {e}")
+        
+        # Default cursors
+        return {
+            "dmesg": {"last_line": 0, "last_timestamp": 0},
+            "journal": {"cursor": "", "last_timestamp": 0},
+            "syslog": {"byte_offset": 0, "inode": 0, "last_timestamp": 0}
+        }
+    
+    def _save_cursors(self) -> None:
+        """Save cursor positions to persistent storage."""
+        try:
+            self.auth_dir.mkdir(parents=True, exist_ok=True)
+            with open(self.cursors_file, 'w') as f:
+                json.dump(self.cursors, f)
+        except Exception as e:
+            self.logger.error(f"Error saving cursors: {e}")
+    
+    def _parse_severity(self, line: str) -> Optional[str]:
+        """Extract severity level from log line."""
+        line_upper = line.upper()
+        if any(word in line_upper for word in ['ERROR', 'ERR']):
+            return 'ERROR'
+        elif any(word in line_upper for word in ['WARN', 'WARNING']):
+            return 'WARN'
+        elif any(word in line_upper for word in ['INFO']):
+            return 'INFO'
+        elif any(word in line_upper for word in ['DEBUG']):
+            return 'DEBUG'
+        return None
+    
+    def _should_include_severity(self, severity: Optional[str]) -> bool:
+        """Check if log entry should be included based on severity filter."""
+        if not severity:
+            return True  # Include entries without detected severity
+            
+        severity_levels = ['DEBUG', 'INFO', 'WARN', 'ERROR']
+        try:
+            min_level_idx = severity_levels.index(self.severity_filter)
+            current_level_idx = severity_levels.index(severity)
+            return current_level_idx >= min_level_idx
+        except ValueError:
+            return True  # Include if severity not recognized
+    
+    def collect_new_logs(self) -> List[LogEntry]:
+        """Collect new log entries from all enabled sources."""
+        if not self.enabled:
+            return []
+            
+        all_logs = []
+        
+        if 'dmesg' in self.enabled_sources:
+            all_logs.extend(self._collect_dmesg_incremental())
+        if 'journal' in self.enabled_sources:
+            all_logs.extend(self._collect_journal_incremental())
+        if 'syslog' in self.enabled_sources:
+            all_logs.extend(self._collect_syslog_incremental())
+        
+        # Apply size limit
+        if len(all_logs) > self.max_lines_per_cycle:
+            # Keep most recent entries
+            all_logs = sorted(all_logs, key=lambda x: x.log_timestamp)[-self.max_lines_per_cycle:]
+            self.logger.warning(f"Log collection truncated to {self.max_lines_per_cycle} entries")
+        
+        # Save updated cursors
+        if all_logs:
+            self._save_cursors()
+            
+        return all_logs
+    
+    def _collect_dmesg_incremental(self) -> List[LogEntry]:
+        """Collect new dmesg entries using line counting."""
+        try:
+            import subprocess
+            
+            # Get current dmesg output
+            result = subprocess.run(['dmesg'], capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                return []
+            
+            lines = result.stdout.strip().split('\n')
+            cursor = self.cursors['dmesg']
+            last_line = cursor['last_line']
+            
+            # Get new lines
+            if len(lines) <= last_line:
+                return []  # No new lines
+                
+            new_lines = lines[last_line:]
+            entries = []
+            
+            current_time = int(time.time())
+            for i, line in enumerate(new_lines):
+                if not line.strip():
+                    continue
+                    
+                severity = self._parse_severity(line)
+                if not self._should_include_severity(severity):
+                    continue
+                    
+                entries.append(LogEntry(
+                    log_source='dmesg',
+                    log_timestamp=current_time,  # dmesg doesn't have precise timestamps
+                    content=line.strip(),
+                    severity=severity
+                ))
+            
+            # Update cursor
+            self.cursors['dmesg']['last_line'] = len(lines)
+            self.cursors['dmesg']['last_timestamp'] = current_time
+            
+            return entries
+            
+        except Exception as e:
+            self.logger.error(f"Error collecting dmesg: {e}")
+            return []
+    
+    def _collect_journal_incremental(self) -> List[LogEntry]:
+        """Collect new journal entries using systemd cursor."""
+        try:
+            import subprocess
+            
+            cursor = self.cursors['journal']
+            cmd = ['journalctl', '--output=json', '--no-pager']
+            
+            # Use cursor if available
+            if cursor['cursor']:
+                cmd.extend(['--cursor', cursor['cursor']])
+            else:
+                # First run - get last hour
+                cmd.extend(['--since', '1 hour ago'])
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode != 0:
+                return []
+            
+            entries = []
+            last_cursor = cursor['cursor']
+            
+            for line in result.stdout.strip().split('\n'):
+                if not line.strip():
+                    continue
+                    
+                try:
+                    entry = json.loads(line)
+                    message = entry.get('MESSAGE', '')
+                    if not message:
+                        continue
+                    
+                    # Extract timestamp
+                    timestamp_usec = int(entry.get('__REALTIME_TIMESTAMP', 0))
+                    timestamp = timestamp_usec // 1000000  # Convert to seconds
+                    
+                    # Extract severity
+                    priority = entry.get('PRIORITY', '6')  # Default to INFO
+                    severity_map = {'0': 'ERROR', '1': 'ERROR', '2': 'ERROR', '3': 'ERROR',
+                                   '4': 'WARN', '5': 'INFO', '6': 'INFO', '7': 'DEBUG'}
+                    severity = severity_map.get(str(priority), 'INFO')
+                    
+                    if not self._should_include_severity(severity):
+                        continue
+                    
+                    entries.append(LogEntry(
+                        log_source='journal',
+                        log_timestamp=timestamp,
+                        content=message.strip(),
+                        severity=severity
+                    ))
+                    
+                    # Update cursor from this entry
+                    last_cursor = entry.get('__CURSOR', last_cursor)
+                    
+                except json.JSONDecodeError:
+                    continue
+            
+            # Update cursor
+            if entries:
+                self.cursors['journal']['cursor'] = last_cursor
+                self.cursors['journal']['last_timestamp'] = int(time.time())
+            
+            return entries
+            
+        except Exception as e:
+            self.logger.error(f"Error collecting journal: {e}")
+            return []
+    
+    def _collect_syslog_incremental(self) -> List[LogEntry]:
+        """Collect new syslog entries using file position tracking."""
+        try:
+            syslog_file = Path('/var/log/syslog')
+            if not syslog_file.exists():
+                return []
+            
+            cursor = self.cursors['syslog']
+            stat = syslog_file.stat()
+            
+            # Check for log rotation (inode changed)
+            if cursor['inode'] != 0 and cursor['inode'] != stat.st_ino:
+                # Log was rotated, start from beginning
+                cursor['byte_offset'] = 0
+                cursor['inode'] = stat.st_ino
+            
+            # Read new content
+            with open(syslog_file, 'r') as f:
+                f.seek(cursor['byte_offset'])
+                new_content = f.read()
+                new_offset = f.tell()
+            
+            if not new_content.strip():
+                return []
+            
+            entries = []
+            current_time = int(time.time())
+            
+            for line in new_content.strip().split('\n'):
+                if not line.strip():
+                    continue
+                    
+                severity = self._parse_severity(line)
+                if not self._should_include_severity(severity):
+                    continue
+                    
+                entries.append(LogEntry(
+                    log_source='syslog',
+                    log_timestamp=current_time,  # Could parse syslog timestamps
+                    content=line.strip(),
+                    severity=severity
+                ))
+            
+            # Update cursor
+            self.cursors['syslog']['byte_offset'] = new_offset
+            self.cursors['syslog']['inode'] = stat.st_ino
+            self.cursors['syslog']['last_timestamp'] = current_time
+            
+            return entries
+            
+        except Exception as e:
+            self.logger.error(f"Error collecting syslog: {e}")
+            return []

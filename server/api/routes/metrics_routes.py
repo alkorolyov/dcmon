@@ -14,12 +14,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 # Support running as script or as package
 try:
-    from ...models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat
+    from ...models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
     from ..schemas import MetricsBatchRequest
     from ..dependencies import AuthDependencies
     from ..metric_queries import MetricQueryBuilder, get_cpu_timeseries, get_vrm_timeseries
 except ImportError:
-    from models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat
+    from models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
     from api.schemas import MetricsBatchRequest
     from api.dependencies import AuthDependencies
     from api.metric_queries import MetricQueryBuilder, get_cpu_timeseries, get_vrm_timeseries
@@ -75,6 +75,26 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
             inserted_float = MetricPointsFloat.insert_many(float_points).on_conflict_ignore().execute()
             inserted_total += int(inserted_float or 0)
 
+        # Process log entries
+        inserted_logs = 0
+        if body.logs:
+            log_entries = []
+            current_time = int(time.time())
+            
+            for log_data in body.logs:
+                log_entries.append({
+                    "client": client.id,
+                    "log_source": log_data.log_source,
+                    "log_timestamp": log_data.log_timestamp,
+                    "received_timestamp": current_time,
+                    "content": log_data.content,
+                    "severity": log_data.severity
+                })
+            
+            if log_entries:
+                inserted_logs = LogEntry.insert_many(log_entries).execute()
+                logger.debug(f"Log entries from client {client.id} ({client.hostname}): received {len(body.logs)}, inserted {inserted_logs}")
+
         # Hardware change detection
         if body.hw_hash and body.hw_hash != client.hw_hash:
             logger.warning(f"Hardware changed on client {client.id} ({client.hostname})")
@@ -83,7 +103,11 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
         
         client.update_last_seen()
         logger.debug(f"Metrics from client {client.id} ({client.hostname}): received {len(body.metrics)}, inserted {inserted_total}")
-        return {"received": len(body.metrics), "inserted": inserted_total}
+        
+        response = {"received": len(body.metrics), "inserted": inserted_total}
+        if body.logs:
+            response.update({"logs_received": len(body.logs), "logs_inserted": inserted_logs})
+        return response
 
     @router.get("/api/metrics", dependencies=[Depends(auth_deps.require_admin_auth)])
     def query_metrics(

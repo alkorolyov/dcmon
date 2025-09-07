@@ -244,6 +244,51 @@ class Command(BaseModel):
         self.save()
 
 
+class LogEntry(BaseModel):
+    """Client log entries for troubleshooting."""
+    client = ForeignKeyField(Client, backref="log_entries", on_delete="CASCADE", index=True)
+    log_source = CharField()  # 'dmesg', 'journal', 'syslog'
+    log_timestamp = IntegerField()  # Original log entry timestamp
+    received_timestamp = IntegerField()  # When server received it
+    content = TextField()  # Raw log line
+    severity = CharField(null=True)  # 'ERROR', 'WARN', 'INFO', 'DEBUG'
+
+    class Meta:
+        indexes = (
+            (("client", "log_source", "log_timestamp"), False),
+            (("client", "severity"), False),  # For severity filtering
+            (("received_timestamp",), False),  # For cleanup queries
+        )
+
+    @classmethod
+    def cleanup_old_logs(cls, days_to_keep: int = 7) -> int:
+        """Remove old log entries beyond retention period."""
+        cutoff = int(time.time()) - days_to_keep * 24 * 3600
+        deleted = cls.delete().where(cls.received_timestamp < cutoff).execute()
+        logger.info(f"log cleanup: removed {deleted} entries (< {days_to_keep}d)")
+        return deleted
+
+    @classmethod
+    def get_logs_for_client(cls, client_id: int, limit: int = 1000, 
+                           log_source: Optional[str] = None,
+                           severity: Optional[str] = None,
+                           start_time: Optional[int] = None,
+                           end_time: Optional[int] = None) -> List["LogEntry"]:
+        """Query logs for a client with filtering."""
+        query = cls.select().where(cls.client == client_id)
+        
+        if log_source:
+            query = query.where(cls.log_source == log_source)
+        if severity:
+            query = query.where(cls.severity == severity)
+        if start_time:
+            query = query.where(cls.log_timestamp >= start_time)
+        if end_time:
+            query = query.where(cls.log_timestamp <= end_time)
+            
+        return list(query.order_by(cls.log_timestamp.desc()).limit(limit))
+
+
 class DatabaseManager:
     """DB lifecycle + minimal convenience ops."""
 
@@ -264,7 +309,7 @@ class DatabaseManager:
             database.execute_sql("PRAGMA cache_size=10000;")
             database.execute_sql("PRAGMA temp_store=MEMORY;")
 
-            database.create_tables([Client, MetricSeries, MetricPointsInt, MetricPointsFloat, Command], safe=True)
+            database.create_tables([Client, MetricSeries, MetricPointsInt, MetricPointsFloat, Command, LogEntry], safe=True)
             self.connected = True
             logger.info(f"database initialized: {self.db_path}")
             return True

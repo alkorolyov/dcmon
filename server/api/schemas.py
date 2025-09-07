@@ -44,8 +44,16 @@ class MetricRecord(BaseModel):
         return self
 
 
+class LogEntryData(BaseModel):
+    log_source: str = Field(..., pattern="^(dmesg|journal|syslog)$")
+    log_timestamp: int
+    content: str = Field(..., min_length=1)
+    severity: Optional[str] = Field(None, pattern="^(ERROR|WARN|INFO|DEBUG)$")
+
+
 class MetricsBatchRequest(BaseModel):
     metrics: List[MetricRecord]
+    logs: Optional[List[LogEntryData]] = []
     hw_hash: Optional[str] = None
 
 

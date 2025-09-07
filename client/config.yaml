@@ -8,4 +8,10 @@ exporters:
   nvme: true
   nvsmi: true
   bmc_fan: true
+  ipmicfg_psu: true
+log_monitoring:
+  enabled: false
+  sources: ["dmesg", "journal"]
+  severity_filter: "ERROR"
+  max_lines_per_cycle: 25
 log_level: "INFO"

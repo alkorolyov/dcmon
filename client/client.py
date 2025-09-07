@@ -39,11 +39,11 @@ import yaml
 try:
     # when run as module
     from .auth import ClientAuth, setup_client_auth
-    from .exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter
+    from .exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter, LogExporter
 except ImportError:
     # when run as script from project root
     from auth import ClientAuth, setup_client_auth
-    from exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter
+    from exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter, LogExporter
 
 
 LOG = logging.getLogger("dcmon.client")
@@ -402,7 +402,7 @@ class MetricsCollector:
 
 
 
-def send_metrics(server_base: str, client_token: str, metrics: List[Dict[str, Any]], hw_hash: Optional[str] = None) -> Dict[str, Any]:
+def send_metrics(server_base: str, client_token: str, metrics: List[Dict[str, Any]], hw_hash: Optional[str] = None, logs: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     if not metrics:
         return {"received": 0, "inserted": 0}
     url = server_base.rstrip("/") + "/api/metrics"
@@ -410,6 +410,8 @@ def send_metrics(server_base: str, client_token: str, metrics: List[Dict[str, An
     data = {"metrics": metrics}
     if hw_hash:
         data["hw_hash"] = hw_hash
+    if logs:
+        data["logs"] = logs
     return _post_json(url, data, headers)
 
 
@@ -515,6 +517,9 @@ async def run_client(config: ClientConfig) -> None:
     # Initialize metrics collector once (singleton exporters) with hardware info
     metrics_collector = MetricsCollector(hw_info=hw_info)
     
+    # Initialize log exporter with auth_dir and config
+    log_exporter = LogExporter(Path(config.auth_dir), config.__dict__)
+    
     # Metrics loop with reconnection logging
     LOG.info("client starting; posting metrics to %s every %ss", config.server, config.interval)
     connection_failed = False
@@ -524,7 +529,22 @@ async def run_client(config: ClientConfig) -> None:
             batch = await metrics_collector.collect_metrics()
             if not batch:
                 LOG.warning("no metrics collected")
-            res = send_metrics(config.server, token, batch, hw_hash)
+            
+            # Collect logs (non-async, synchronous collection)
+            log_entries = log_exporter.collect_new_logs()
+            logs_data = []
+            if log_entries:
+                logs_data = [
+                    {
+                        "log_source": entry.log_source,
+                        "log_timestamp": entry.log_timestamp,
+                        "content": entry.content,
+                        "severity": entry.severity
+                    }
+                    for entry in log_entries
+                ]
+            
+            res = send_metrics(config.server, token, batch, hw_hash, logs_data if logs_data else None)
             LOG.debug("sent metrics: %s", res)
             
             # Log successful reconnection after failures
