@@ -1604,6 +1604,10 @@ class LogExporter:
             if not vast_file.exists():
                 return []
             
+            # Handle missing cursor (first run for this log source)
+            if 'vast' not in self.cursors:
+                return self._collect_vast_history()
+            
             cursor = self.cursors['vast']
             stat = vast_file.stat()
             
@@ -1889,3 +1893,801 @@ class LogExporter:
             
         except Exception as e:
             raise Exception(f"Failed to collect vast history: {e}")
+
+
+# ============================================================================
+# NEW REFACTORED LOG EXPORTERS - Inheritance-based Architecture
+# ============================================================================
+
+class BaseLogExporter:
+    """Base class for log exporters with common functionality."""
+    
+    def __init__(self, auth_dir: Path, config: Optional[Dict] = None):
+        self.auth_dir = Path(auth_dir)
+        self.cursors_file = self.auth_dir / "log-cursors.json"
+        self.config = config or {}
+        self.logger = logging.getLogger(f"dcmon.{self.__class__.__name__.lower()}")
+        
+        # Configuration
+        log_config = self.config.get('log_monitoring', {})
+        self.enabled = log_config.get('enabled', False)
+        self.max_lines_per_cycle = log_config.get('max_lines_per_cycle', 50)
+        self.severity_filter = log_config.get('severity_filter', 'WARN')
+        self.enabled_sources = log_config.get('sources', ['dmesg', 'journal'])
+        
+        # Each exporter has a source_name (defined in children)
+        self.source_name = getattr(self, 'source_name', 'unknown')
+    
+    def is_enabled(self) -> bool:
+        """Check if this log source is enabled and available."""
+        return (self.enabled and 
+                self.source_name in self.enabled_sources and 
+                self.is_available())
+    
+    def get_cursor_key(self) -> str:
+        """Get the cursor key for this exporter."""
+        return self.source_name
+    
+    def _parse_severity(self, line: str) -> str:
+        """Parse severity level from log line."""
+        line_lower = line.lower()
+        if any(word in line_lower for word in ['error', 'err', 'fatal', 'fail', 'critical']):
+            return 'ERROR'
+        elif any(word in line_lower for word in ['warn', 'warning']):
+            return 'WARN'  
+        elif any(word in line_lower for word in ['info', 'information']):
+            return 'INFO'
+        else:
+            return 'DEBUG'
+    
+    def _should_include_severity(self, severity: str) -> bool:
+        """Check if severity should be included based on filter."""
+        severity_levels = {'DEBUG': 0, 'INFO': 1, 'WARN': 2, 'ERROR': 3}
+        filter_level = severity_levels.get(self.severity_filter, 2)
+        entry_level = severity_levels.get(severity, 0)
+        return entry_level >= filter_level
+    
+    # Abstract methods to be implemented by children
+    def is_available(self) -> bool:
+        """Check if the log source is available."""
+        raise NotImplementedError("Subclasses must implement is_available()")
+    
+    def collect_incremental(self, cursors: Dict) -> List[LogEntry]:
+        """Collect new log entries since last cursor position."""
+        raise NotImplementedError("Subclasses must implement collect_incremental()")
+    
+    def collect_history(self, cursors: Dict) -> List[LogEntry]:
+        """Collect historical log entries (first run)."""
+        raise NotImplementedError("Subclasses must implement collect_history()")
+    
+    def update_cursor(self, cursors: Dict, **cursor_data) -> None:
+        """Update cursor data for this log source."""
+        cursors[self.source_name] = cursor_data
+
+
+class VastLogExporter(BaseLogExporter):
+    """Vast.ai log exporter for /var/lib/vastai_kaalia/kaalia.log."""
+    
+    source_name = "vast"
+    
+    def is_available(self) -> bool:
+        """Check if vast log file exists."""
+        return Path('/var/lib/vastai_kaalia/kaalia.log').exists()
+    
+    def collect_incremental(self, cursors: Dict) -> List[LogEntry]:
+        """Collect new vast log entries using file position tracking."""
+        try:
+            vast_file = Path('/var/lib/vastai_kaalia/kaalia.log')
+            if not vast_file.exists():
+                return []
+            
+            # Handle missing cursor (first run for this log source)
+            if self.source_name not in cursors:
+                return self.collect_history(cursors)
+            
+            cursor = cursors[self.source_name]
+            stat = vast_file.stat()
+            
+            # Check for log rotation (inode changed)
+            if cursor['inode'] != 0 and cursor['inode'] != stat.st_ino:
+                cursor['byte_offset'] = 0
+                cursor['inode'] = stat.st_ino
+            
+            # Read new content
+            with open(vast_file, 'r') as f:
+                f.seek(cursor['byte_offset'])
+                new_content = f.read()
+                new_offset = f.tell()
+            
+            if not new_content.strip():
+                return []
+            
+            entries = []
+            for line in new_content.strip().split('\n'):
+                if not line.strip():
+                    continue
+                    
+                severity = self._parse_severity(line)
+                if not self._should_include_severity(severity):
+                    continue
+                
+                parsed_timestamp = self._parse_vast_timestamp(line)
+                if parsed_timestamp is None:
+                    continue
+                    
+                entries.append(LogEntry(
+                    log_source=self.source_name,
+                    log_timestamp=parsed_timestamp,
+                    content=self._strip_vast_metadata(line),
+                    severity=severity
+                ))
+            
+            # Update cursor
+            self.update_cursor(cursors, 
+                              byte_offset=new_offset, 
+                              inode=stat.st_ino, 
+                              last_timestamp=int(time.time()))
+            
+            return entries
+            
+        except Exception as e:
+            raise Exception(f"Failed to collect vast incremental: {e}")
+    
+    def collect_history(self, cursors: Dict) -> List[LogEntry]:
+        """Collect last 1000 lines from vast log file (first run)."""
+        try:
+            vast_file = Path('/var/lib/vastai_kaalia/kaalia.log')
+            if not vast_file.exists():
+                raise Exception("/var/lib/vastai_kaalia/kaalia.log does not exist")
+            
+            # Read last 1000 lines from file
+            with open(vast_file, 'r') as f:
+                lines = f.readlines()
+            
+            # Crop to last 1000 lines
+            if len(lines) > 1000:
+                lines = lines[-1000:]
+                self.logger.info(f"vast history cropped to last 1000 lines")
+            
+            entries = []
+            for line in lines:
+                if not line.strip():
+                    continue
+                    
+                severity = self._parse_severity(line)
+                if not self._should_include_severity(severity):
+                    continue
+                
+                parsed_timestamp = self._parse_vast_timestamp(line)
+                if parsed_timestamp is None:
+                    continue
+                    
+                entries.append(LogEntry(
+                    log_source=self.source_name,
+                    log_timestamp=parsed_timestamp,
+                    content=self._strip_vast_metadata(line),
+                    severity=severity
+                ))
+            
+            # Set cursor for future incremental collection
+            stat = vast_file.stat()
+            self.update_cursor(cursors,
+                              byte_offset=stat.st_size,
+                              inode=stat.st_ino,
+                              last_timestamp=int(time.time()))
+            
+            return entries
+            
+        except Exception as e:
+            raise Exception(f"Failed to collect vast history: {e}")
+    
+    def _parse_vast_timestamp(self, line: str) -> Optional[int]:
+        """Parse vast timestamp from format '[2025-09-07 15:33:07.798]' and convert to UTC."""
+        import re
+        from datetime import datetime, timezone
+        try:
+            match = re.match(r'^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\]', line.strip())
+            if not match:
+                return None
+            
+            timestamp_str = match.group(1)
+            dt_local = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
+            dt_local = dt_local.replace(tzinfo=datetime.now().astimezone().tzinfo)
+            return int(dt_local.astimezone(timezone.utc).timestamp())
+        except Exception as e:
+            raise Exception(f"Failed to parse vast timestamp from '{line[:50]}...': {e}")
+    
+    def _strip_vast_metadata(self, line: str) -> str:
+        """Strip timestamp and metadata from vast line, keeping only message content."""
+        import re
+        match = re.match(r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] \[Kaalia\] \[(?:info|warn|error)\] P\d+\s+(.*)', line.strip())
+        if match:
+            return match.group(1)
+        return line.strip()
+
+
+class SyslogExporter(BaseLogExporter):
+    """System syslog exporter for /var/log/syslog."""
+    
+    source_name = "syslog"
+    
+    def is_available(self) -> bool:
+        """Check if syslog file exists."""
+        return Path('/var/log/syslog').exists()
+    
+    def collect_incremental(self, cursors: Dict) -> List[LogEntry]:
+        """Collect new syslog entries using file position tracking."""
+        try:
+            syslog_file = Path('/var/log/syslog')
+            if not syslog_file.exists():
+                return []
+            
+            # Handle missing cursor (first run for this log source)
+            if self.source_name not in cursors:
+                return self.collect_history(cursors)
+            
+            cursor = cursors[self.source_name]
+            stat = syslog_file.stat()
+            
+            # Check for log rotation (inode changed)
+            if cursor['inode'] != 0 and cursor['inode'] != stat.st_ino:
+                cursor['byte_offset'] = 0
+                cursor['inode'] = stat.st_ino
+            
+            # Read new content
+            with open(syslog_file, 'r') as f:
+                f.seek(cursor['byte_offset'])
+                new_content = f.read()
+                new_offset = f.tell()
+            
+            if not new_content.strip():
+                return []
+            
+            entries = []
+            for line in new_content.strip().split('\n'):
+                if not line.strip():
+                    continue
+                    
+                severity = self._parse_severity(line)
+                if not self._should_include_severity(severity):
+                    continue
+                
+                parsed_timestamp = self._parse_syslog_timestamp(line)
+                if parsed_timestamp is None:
+                    continue
+                    
+                entries.append(LogEntry(
+                    log_source=self.source_name,
+                    log_timestamp=parsed_timestamp,
+                    content=self._strip_syslog_timestamp(line),
+                    severity=severity
+                ))
+            
+            # Update cursor
+            self.update_cursor(cursors, 
+                              byte_offset=new_offset, 
+                              inode=stat.st_ino, 
+                              last_timestamp=int(time.time()))
+            
+            return entries
+            
+        except Exception as e:
+            raise Exception(f"Failed to collect syslog incremental: {e}")
+    
+    def collect_history(self, cursors: Dict) -> List[LogEntry]:
+        """Collect last 1000 lines from syslog file (first run)."""
+        try:
+            syslog_file = Path('/var/log/syslog')
+            if not syslog_file.exists():
+                raise Exception("/var/log/syslog does not exist")
+            
+            # Read last 1000 lines from file
+            with open(syslog_file, 'r') as f:
+                lines = f.readlines()
+            
+            # Crop to last 1000 lines
+            if len(lines) > 1000:
+                lines = lines[-1000:]
+                self.logger.info(f"syslog history cropped to last 1000 lines")
+            
+            entries = []
+            for line in lines:
+                if not line.strip():
+                    continue
+                    
+                severity = self._parse_severity(line)
+                if not self._should_include_severity(severity):
+                    continue
+                
+                parsed_timestamp = self._parse_syslog_timestamp(line)
+                if parsed_timestamp is None:
+                    continue
+                    
+                entries.append(LogEntry(
+                    log_source=self.source_name,
+                    log_timestamp=parsed_timestamp,
+                    content=self._strip_syslog_timestamp(line),
+                    severity=severity
+                ))
+            
+            # Set cursor for future incremental collection
+            stat = syslog_file.stat()
+            self.update_cursor(cursors,
+                              byte_offset=stat.st_size,
+                              inode=stat.st_ino,
+                              last_timestamp=int(time.time()))
+            
+            return entries
+            
+        except Exception as e:
+            raise Exception(f"Failed to collect syslog history: {e}")
+    
+    def _parse_syslog_timestamp(self, line: str) -> Optional[int]:
+        """Parse syslog timestamp from standard format 'Sep  7 13:14:25' and convert to UTC."""
+        import re
+        from datetime import datetime, timezone
+        try:
+            match = re.match(r'^(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})', line.strip())
+            if not match:
+                return None
+            
+            timestamp_str = match.group(1)
+            current_year = datetime.now().year
+            full_timestamp = f"{current_year} {timestamp_str}"
+            
+            dt_local = datetime.strptime(full_timestamp, "%Y %b %d %H:%M:%S")
+            dt_local = dt_local.replace(tzinfo=datetime.now().astimezone().tzinfo)
+            return int(dt_local.astimezone(timezone.utc).timestamp())
+        except Exception as e:
+            raise Exception(f"Failed to parse syslog timestamp from '{line[:50]}...': {e}")
+    
+    def _strip_syslog_timestamp(self, line: str) -> str:
+        """Strip timestamp from syslog line, keeping only message content."""
+        import re
+        match = re.match(r'^(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+(\S+)\s+(.*)', line.strip())
+        if match:
+            return match.group(3)
+        return line.strip()
+
+
+class DmesgExporter(BaseLogExporter):
+    """Kernel dmesg exporter."""
+    
+    source_name = "dmesg"
+    
+    def __init__(self, auth_dir: Path, config: Optional[Dict] = None):
+        super().__init__(auth_dir, config)
+        # Cache boot time once - only changes on system reboot (which restarts client)
+        self.boot_time = self._get_boot_time() if self.is_enabled() else None
+    
+    def is_available(self) -> bool:
+        """dmesg is always available on Linux systems."""
+        return True
+    
+    def collect_incremental(self, cursors: Dict) -> List[LogEntry]:
+        """Collect new dmesg entries using line count tracking."""
+        try:
+            import subprocess
+            
+            # Handle missing cursor (first run for this log source)
+            if self.source_name not in cursors:
+                return self.collect_history(cursors)
+            
+            cursor = cursors[self.source_name]
+            
+            # Get current dmesg output
+            result = subprocess.run(['dmesg'], capture_output=True, text=True, timeout=10)
+            if result.returncode != 0:
+                raise Exception(f"dmesg command failed: {result.stderr}")
+            
+            lines = result.stdout.strip().split('\n')
+            last_line = cursor.get('last_line', 0)
+            
+            # Get new lines
+            if len(lines) <= last_line:
+                return []
+            
+            new_lines = lines[last_line:]
+            entries = []
+            
+            for line in new_lines:
+                if not line.strip():
+                    continue
+                    
+                severity = self._parse_severity(line)
+                if not self._should_include_severity(severity):
+                    continue
+                
+                parsed_timestamp = self._parse_dmesg_timestamp(line)
+                if parsed_timestamp is None:
+                    continue
+                    
+                entries.append(LogEntry(
+                    log_source=self.source_name,
+                    log_timestamp=parsed_timestamp,
+                    content=line.strip(),
+                    severity=severity
+                ))
+            
+            # Update cursor
+            self.update_cursor(cursors,
+                              last_line=len(lines),
+                              last_timestamp=int(time.time()))
+            
+            return entries
+            
+        except Exception as e:
+            raise Exception(f"Failed to collect dmesg incremental: {e}")
+    
+    def collect_history(self, cursors: Dict) -> List[LogEntry]:
+        """Collect full dmesg history since boot (first run)."""
+        try:
+            import subprocess
+            
+            result = subprocess.run(['dmesg'], capture_output=True, text=True, timeout=10)
+            if result.returncode != 0:
+                raise Exception(f"dmesg command failed: {result.stderr}")
+            
+            lines = result.stdout.strip().split('\n')
+            
+            # Crop to last 1000 lines if exceeding
+            if len(lines) > 1000:
+                lines = lines[-1000:]
+                self.logger.info(f"dmesg history cropped to last 1000 lines")
+            
+            entries = []
+            for line in lines:
+                if not line.strip():
+                    continue
+                    
+                severity = self._parse_severity(line)
+                if not self._should_include_severity(severity):
+                    continue
+                
+                parsed_timestamp = self._parse_dmesg_timestamp(line)
+                if parsed_timestamp is None:
+                    continue
+                    
+                entries.append(LogEntry(
+                    log_source=self.source_name,
+                    log_timestamp=parsed_timestamp,
+                    content=line.strip(),
+                    severity=severity
+                ))
+            
+            # Set cursor to total line count for future incremental collection
+            self.update_cursor(cursors,
+                              last_line=len(result.stdout.strip().split('\n')),
+                              last_timestamp=int(time.time()))
+            
+            return entries
+            
+        except Exception as e:
+            raise Exception(f"Failed to collect dmesg history: {e}")
+    
+    def _get_boot_time(self) -> int:
+        """Get system boot time from /proc/stat."""
+        try:
+            with open('/proc/stat', 'r') as f:
+                for line in f:
+                    if line.startswith('btime'):
+                        return int(line.split()[1])
+            raise Exception("btime not found in /proc/stat")
+        except Exception as e:
+            raise Exception(f"Failed to get boot time: {e}")
+    
+    def _parse_dmesg_timestamp(self, line: str) -> Optional[int]:
+        """Parse dmesg timestamp from kernel line format [12345.67]."""
+        import re
+        try:
+            match = re.match(r'^\[\s*(\d+\.\d+)\]', line.strip())
+            if not match:
+                return None
+            
+            kernel_seconds = float(match.group(1))
+            return self.boot_time + int(kernel_seconds)
+        except Exception as e:
+            raise Exception(f"Failed to parse dmesg timestamp from '{line[:50]}...': {e}")
+
+
+class JournalExporter(BaseLogExporter):
+    """Systemd journal exporter."""
+    
+    source_name = "journal"
+    
+    def is_available(self) -> bool:
+        """Check if journalctl is available."""
+        import subprocess
+        try:
+            subprocess.run(['journalctl', '--version'], capture_output=True, timeout=5)
+            return True
+        except:
+            return False
+    
+    def collect_incremental(self, cursors: Dict) -> List[LogEntry]:
+        """Collect new journal entries using systemd cursor."""
+        try:
+            import subprocess
+            import json
+            
+            # Handle missing cursor (first run for this log source)
+            if self.source_name not in cursors:
+                return self.collect_history(cursors)
+            
+            cursor = cursors[self.source_name]
+            cmd = ['journalctl', '--output=json', '--no-pager']
+            
+            # Use cursor if available
+            if cursor.get('cursor'):
+                cmd.extend(['--after-cursor', cursor['cursor']])
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode != 0:
+                return []
+            
+            entries = []
+            last_cursor = cursor.get('cursor', "")
+            
+            for line in result.stdout.strip().split('\n'):
+                if not line.strip():
+                    continue
+                    
+                try:
+                    entry = json.loads(line)
+                    message = entry.get('MESSAGE', '')
+                    if not message:
+                        continue
+                    
+                    # Extract timestamp
+                    timestamp_usec = int(entry.get('__REALTIME_TIMESTAMP', 0))
+                    timestamp = timestamp_usec // 1000000  # Convert to seconds
+                    
+                    # Extract severity
+                    priority = entry.get('PRIORITY', '6')  # Default to INFO
+                    severity_map = {'0': 'ERROR', '1': 'ERROR', '2': 'ERROR', '3': 'ERROR',
+                                   '4': 'WARN', '5': 'INFO', '6': 'INFO', '7': 'DEBUG'}
+                    severity = severity_map.get(priority, 'INFO')
+                    
+                    if not self._should_include_severity(severity):
+                        continue
+                    
+                    # Enhanced content with context
+                    content = self._format_journal_content(entry, message)
+                    
+                    entries.append(LogEntry(
+                        log_source=self.source_name,
+                        log_timestamp=timestamp,
+                        content=content,
+                        severity=severity
+                    ))
+                    
+                    # Update cursor
+                    last_cursor = entry.get('__CURSOR', last_cursor)
+                    
+                except (json.JSONDecodeError, ValueError, KeyError):
+                    continue
+            
+            # Update cursor
+            if entries:  # Only update if we got new entries
+                self.update_cursor(cursors,
+                                  cursor=last_cursor,
+                                  last_timestamp=int(time.time()))
+            
+            return entries
+            
+        except Exception as e:
+            raise Exception(f"Failed to collect journal incremental: {e}")
+    
+    def collect_history(self, cursors: Dict) -> List[LogEntry]:
+        """Collect journal history (first run)."""
+        try:
+            import subprocess
+            import json
+            
+            # Get last 1000 entries
+            cmd = ['journalctl', '--output=json', '--no-pager', '--lines=1000']
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0:
+                raise Exception(f"journalctl command failed: {result.stderr}")
+            
+            entries = []
+            last_cursor = ""
+            entry_count = 0
+            
+            for line in result.stdout.strip().split('\n'):
+                if not line.strip():
+                    continue
+                    
+                try:
+                    entry = json.loads(line)
+                    message = entry.get('MESSAGE', '')
+                    if not message:
+                        continue
+                    
+                    # Crop to 1000 entries max
+                    entry_count += 1
+                    if entry_count > 1000:
+                        self.logger.info(f"journal history cropped to 1000 entries")
+                        break
+                    
+                    # Extract timestamp
+                    timestamp_usec = int(entry.get('__REALTIME_TIMESTAMP', 0))
+                    timestamp = timestamp_usec // 1000000
+                    
+                    # Extract severity
+                    priority = entry.get('PRIORITY', '6')
+                    severity_map = {'0': 'ERROR', '1': 'ERROR', '2': 'ERROR', '3': 'ERROR',
+                                   '4': 'WARN', '5': 'INFO', '6': 'INFO', '7': 'DEBUG'}
+                    severity = severity_map.get(priority, 'INFO')
+                    
+                    if not self._should_include_severity(severity):
+                        continue
+                    
+                    # Enhanced content with context
+                    content = self._format_journal_content(entry, message)
+                    
+                    entries.append(LogEntry(
+                        log_source=self.source_name,
+                        log_timestamp=timestamp,
+                        content=content,
+                        severity=severity
+                    ))
+                    
+                    last_cursor = entry.get('__CURSOR', last_cursor)
+                    
+                except (json.JSONDecodeError, ValueError, KeyError):
+                    continue
+            
+            # Set cursor for future incremental collection
+            if last_cursor:
+                self.update_cursor(cursors,
+                                  cursor=last_cursor,
+                                  last_timestamp=int(time.time()))
+            
+            return entries
+            
+        except Exception as e:
+            raise Exception(f"Failed to collect journal history: {e}")
+    
+    def _format_journal_content(self, entry: dict, message: str) -> str:
+        """Format journal entry with enhanced context."""
+        context_parts = []
+        
+        # Add systemd unit if available
+        if entry.get('_SYSTEMD_UNIT'):
+            context_parts.append(entry['_SYSTEMD_UNIT'])
+        elif entry.get('UNIT'):
+            context_parts.append(entry['UNIT'])
+        
+        # Add service name or identifier
+        if entry.get('SYSLOG_IDENTIFIER'):
+            identifier = entry['SYSLOG_IDENTIFIER']
+            if entry.get('_PID'):
+                identifier += f"[{entry['_PID']}]"
+            context_parts.append(identifier)
+        
+        if context_parts:
+            return f"[{'] ['.join(context_parts)}]: {message.strip()}"
+        else:
+            return message.strip()
+
+
+class LogExporterManager:
+    """Manager for coordinating multiple log exporters using inheritance pattern."""
+    
+    def __init__(self, auth_dir: Path, config: Optional[Dict] = None):
+        self.auth_dir = Path(auth_dir)
+        self.cursors_file = self.auth_dir / "log-cursors.json"
+        self.config = config or {}
+        self.logger = logging.getLogger("dcmon.log_exporter_manager")
+        
+        # Load cursors on initialization
+        self.cursors = self._load_cursors()
+        
+        # Configuration
+        log_config = self.config.get('log_monitoring', {})
+        self.enabled = log_config.get('enabled', False)
+        self.max_lines_per_cycle = log_config.get('max_lines_per_cycle', 50)
+        self.enabled_sources = log_config.get('sources', ['dmesg', 'journal'])
+        
+        # Initialize all available exporters
+        self.exporters = {
+            'dmesg': DmesgExporter(auth_dir, config),
+            'journal': JournalExporter(auth_dir, config), 
+            'syslog': SyslogExporter(auth_dir, config),
+            'vast': VastLogExporter(auth_dir, config)
+        }
+        
+        # Log availability status
+        for name, exporter in self.exporters.items():
+            if exporter.is_enabled():
+                self.logger.debug(f"{name} log exporter enabled and available")
+            elif name in self.enabled_sources:
+                self.logger.info(f"{name} logs disabled - not available")
+    
+    def collect_new_logs(self) -> List[LogEntry]:
+        """Collect new log entries from all enabled exporters."""
+        if not self.enabled:
+            return []
+        
+        is_first_run = self._is_first_run()
+        if is_first_run:
+            self.logger.info("First run detected - collecting extended log history")
+        
+        all_logs = []
+        
+        # Collect from each enabled exporter
+        for name, exporter in self.exporters.items():
+            if not exporter.is_enabled():
+                continue
+                
+            try:
+                if is_first_run:
+                    logs = exporter.collect_history(self.cursors)
+                else:
+                    logs = exporter.collect_incremental(self.cursors)
+                
+                all_logs.extend(logs)
+                self.logger.debug(f"Collected {len(logs)} entries from {name}")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to collect {name} logs: {e}")
+                # Continue with other exporters (fail-fast per exporter, not globally)
+        
+        # Apply size limit (different for first run vs normal)
+        max_entries = 3000 if is_first_run else self.max_lines_per_cycle
+        if len(all_logs) > max_entries:
+            # Keep most recent entries
+            all_logs = sorted(all_logs, key=lambda x: x.log_timestamp)[-max_entries:]
+            self.logger.info(f"Log collection limited to {max_entries} most recent entries")
+        
+        # Save cursors after collection
+        if all_logs:  # Only save if we collected something
+            self._save_cursors()
+        
+        return all_logs
+    
+    def _load_cursors(self) -> Dict:
+        """Load cursor positions from persistent storage."""
+        # Default cursors for all possible sources
+        default_cursors = {
+            "dmesg": {"last_line": 0, "last_timestamp": 0},
+            "journal": {"cursor": "", "last_timestamp": 0},
+            "syslog": {"byte_offset": 0, "inode": 0, "last_timestamp": 0},
+            "vast": {"byte_offset": 0, "inode": 0, "last_timestamp": 0}
+        }
+        
+        try:
+            if self.cursors_file.exists():
+                with open(self.cursors_file, 'r') as f:
+                    loaded_cursors = json.load(f)
+                # Merge loaded cursors with defaults (handles missing keys)
+                default_cursors.update(loaded_cursors)
+        except Exception as e:
+            self.logger.error(f"Error loading cursors: {e}")
+        
+        return default_cursors
+    
+    def _save_cursors(self) -> None:
+        """Save cursor positions to persistent storage."""
+        try:
+            self.auth_dir.mkdir(parents=True, exist_ok=True)
+            with open(self.cursors_file, 'w') as f:
+                json.dump(self.cursors, f, indent=2)
+        except Exception as e:
+            self.logger.error(f"Error saving cursors: {e}")
+    
+    def _is_first_run(self) -> bool:
+        """Check if this is the first run (no cursor file or empty cursors)."""
+        if not self.cursors_file.exists():
+            return True
+        
+        # Check if cursors are at default/empty state
+        default_cursors = {
+            "dmesg": {"last_line": 0, "last_timestamp": 0},
+            "journal": {"cursor": "", "last_timestamp": 0},
+            "syslog": {"byte_offset": 0, "inode": 0, "last_timestamp": 0},
+            "vast": {"byte_offset": 0, "inode": 0, "last_timestamp": 0}
+        }
+        return self.cursors == default_cursors

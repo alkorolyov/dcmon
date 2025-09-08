@@ -12,7 +12,7 @@ exporters:
   ipmicfg_psu: true
 log_monitoring:
   enabled: true
-  sources: ["dmesg", "journal", "syslog"]
+  sources: ["dmesg", "journal", "syslog", "vast"]
   severity_filter: "DEBUG"
   max_lines_per_cycle: 50
 log_level: "DEBUG"

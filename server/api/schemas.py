@@ -45,7 +45,7 @@ class MetricRecord(BaseModel):
 
 
 class LogEntryData(BaseModel):
-    log_source: str = Field(..., pattern="^(dmesg|journal|syslog)$")
+    log_source: str = Field(..., pattern="^(dmesg|journal|syslog|vast)$")
     log_timestamp: int
     content: str = Field(..., min_length=1)
     severity: Optional[str] = Field(None, pattern="^(ERROR|WARN|INFO|DEBUG)$")

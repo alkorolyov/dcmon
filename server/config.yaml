@@ -7,6 +7,7 @@ log_level: "INFO"
 
 # Data retention
 metrics_days: 30
+logs_days: 7
 
 # File paths - explicit configuration
 auth_dir: "/etc/dcmon-server"                      # All security files directory

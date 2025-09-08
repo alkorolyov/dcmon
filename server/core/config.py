@@ -26,6 +26,7 @@ class ServerConfig(BaseModel):
     port: int = 8000
     log_level: str = "INFO"
     metrics_days: int = 7
+    logs_days: int = 7
     # File paths - explicit configuration
     auth_dir: str
     db_path: str

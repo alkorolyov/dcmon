@@ -344,7 +344,7 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
             except ImportError:
                 from web.template_helpers import format_elapsed_time
             
-            logger.debug(f"Timeseries {metric_name}: {format_elapsed_time(total_time)}, {len(aggregated_df)} records (CLEANED)")
+            logger.debug(f"Timeseries {metric_name}: {format_elapsed_time(total_time)}, {len(aggregated_df)} records")
             
             # Use specific helper functions for optimal sensor filtering
             if metric_name == "ipmi_temp_celsius" and sensor:

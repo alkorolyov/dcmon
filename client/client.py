@@ -39,11 +39,11 @@ import yaml
 try:
     # when run as module
     from .auth import ClientAuth, setup_client_auth
-    from .exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter, LogExporter
+    from .exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter, LogExporterManager
 except ImportError:
     # when run as script from project root
     from auth import ClientAuth, setup_client_auth
-    from exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter, LogExporter
+    from exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter, LogExporterManager
 
 
 LOG = logging.getLogger("dcmon.client")
@@ -525,8 +525,8 @@ async def run_client(config: ClientConfig) -> None:
     # Initialize metrics collector once (singleton exporters) with hardware info
     metrics_collector = MetricsCollector(hw_info=hw_info)
     
-    # Initialize log exporter with auth_dir and config
-    log_exporter = LogExporter(Path(config.auth_dir), config.__dict__)
+    # Initialize log exporter manager with auth_dir and config
+    log_exporter = LogExporterManager(Path(config.auth_dir), config.__dict__)
     
     # Metrics loop with reconnection logging
     LOG.info("client starting; posting metrics to %s every %ss", config.server, config.interval)

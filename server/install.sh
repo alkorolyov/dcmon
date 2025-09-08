@@ -134,6 +134,7 @@ log_level: "INFO"  # INFO or DEBUG
 
 # Data retention (important for disk space)  
 metrics_days: 30        # Keep metrics for 30 days
+logs_days: 7            # Keep log entries for 7 days
 
 # Test mode (use test admin token if no file found)
 test_mode: false

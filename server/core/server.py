@@ -13,7 +13,7 @@ from fastapi import FastAPI
 
 # Support running as script or as package
 try:
-    from ..models import db_manager, MetricPointsInt, MetricPointsFloat
+    from ..models import db_manager, MetricPointsInt, MetricPointsFloat, LogEntry
     from ..api.dependencies import AuthDependencies
     from ..api.routes.auth_routes import create_auth_routes
     from ..api.routes.admin_routes import create_admin_routes
@@ -22,7 +22,7 @@ try:
     from ..api.routes.dashboard_routes import create_dashboard_routes
     from .config import ServerConfig, resolve_paths, read_admin_token
 except ImportError:
-    from models import db_manager, MetricPointsInt, MetricPointsFloat
+    from models import db_manager, MetricPointsInt, MetricPointsFloat, LogEntry
     from api.dependencies import AuthDependencies
     from api.routes.auth_routes import create_auth_routes
     from api.routes.admin_routes import create_admin_routes
@@ -114,8 +114,9 @@ def create_app(config: ServerConfig) -> FastAPI:
                 try:
                     deleted_int = await loop.run_in_executor(None, MetricPointsInt.cleanup_old_data, config.metrics_days)
                     deleted_float = await loop.run_in_executor(None, MetricPointsFloat.cleanup_old_data, config.metrics_days)
-                    logger.debug("periodic cleanup: removed %s int points, %s float points (%s days)", 
-                                deleted_int, deleted_float, config.metrics_days)
+                    deleted_logs = await loop.run_in_executor(None, LogEntry.cleanup_old_logs, config.logs_days)
+                    logger.debug("periodic cleanup: removed %s int points, %s float points (%s days), %s log entries (%s days)", 
+                                deleted_int, deleted_float, config.metrics_days, deleted_logs, config.logs_days)
                 except Exception as e:
                     logger.error("periodic cleanup failed: %s", e)
                 await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
