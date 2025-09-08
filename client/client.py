@@ -62,6 +62,7 @@ class ClientConfig:
     registration: bool = False
     test_mode: bool = False
     exporters: Dict[str, bool] = None
+    log_monitoring: Dict[str, Any] = None
     
     def __post_init__(self):
         if self.exporters is None:
@@ -73,6 +74,13 @@ class ClientConfig:
                 "nvsmi": True,
                 "bmc_fan": True,
                 "ipmicfg_psu": True
+            }
+        if self.log_monitoring is None:
+            self.log_monitoring = {
+                "enabled": False,
+                "sources": ["dmesg", "journal"],
+                "severity_filter": "ERROR",
+                "max_lines_per_cycle": 25
             }
     
     @classmethod

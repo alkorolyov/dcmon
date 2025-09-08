@@ -3,6 +3,40 @@
 **System**: Production datacenter monitoring with RSA authentication, HTTPS transport, and professional dashboard  
 **Architecture**: FastAPI server + SQLite, up to 100 clients, 30s metrics, Google Cloud free tier optimized
 
+## Design Principles
+
+**Raw Data Architecture:**
+- dcmon stores unprocessed sensor/log data in database
+- No data transformation at collection/storage layer  
+- Analysis, thresholds, alerts handled by external tools
+- Data pipeline: Clients collect raw → Server stores raw → Processing tools consume raw
+
+**Fail-Fast Philosophy:**
+- Explicit error propagation instead of defensive programming
+- No protective fallbacks - code fails immediately when preconditions aren't met
+- Clean failures preferred over corrupted/partial data
+- Clear error messages with full stack traces for debugging
+
+**Simplicity & Performance:**
+- Minimal dependencies (stdlib-focused client, FastAPI server)
+- Direct SQL queries over complex ORMs where performance matters
+- Component-based UI with single source of truth for dimensions
+- Zero public endpoints - admin-controlled registration only
+
+**Production-First Operations:**
+- Self-contained deployment (no external dependencies)
+- Auto-generated SSL certificates with IP SAN support
+- Configurable retention and cleanup policies
+- Admin-controlled client registration for security
+- Google Cloud free tier optimized (up to 100 clients)
+
+**UTC Timestamp Architecture:**
+- All timestamps stored as UTC unix seconds in database and APIs
+- Backend/storage layer uses only UTC (time.time(), database fields)
+- Frontend converts UTC to user's local timezone for display only
+- Ensures consistency across distributed clients in different timezones
+- Follows industry best practices (AWS, Google Cloud, enterprise monitoring)
+
 ## Core Technical Decisions
 
 **Authentication (SSH-like):**
@@ -13,7 +47,7 @@
 - Production mode prompts for secure admin token
 
 **Database (Peewee ORM):**
-- Models: Client, MetricSeries, MetricPoints{Int,Float}, Command
+- Models: Client, MetricSeries, MetricPoints{Int,Float}, Command, LogEntry
 - Integer storage optimization (20-30% reduction)
 - 7-day retention with automatic cleanup
 
@@ -118,6 +152,20 @@ server/
 - NVMe: Drive health, wear percentage
 - PSU: Power consumption, temperature, fan RPM, status (ipmicfg -pminfo, Supermicro only)
 
+**Log Collection (Incremental + Context):**
+- **dmesg**: Kernel ring buffer messages with severity filtering
+- **journal**: Systemd journal with context formatting: `[unit] identifier[pid]: message`
+- **syslog**: Traditional syslog file tracking with log rotation detection
+- **First-run history**: Extended collection (1000 entries per source) for troubleshooting context
+- **Incremental streaming**: Only new entries since last cursor position (30s polling)
+- **Cursor persistence**: Stored in `{auth_dir}/log-cursors.json` for position tracking
+- **Raw data storage**: Enhanced content with context, no processing beyond formatting
+- **Fail-fast collection**: No fallbacks - collection failures propagate as errors
+- **UTC timestamps**: All log timestamps converted to UTC unix seconds for consistency across timezones
+  - dmesg: boot_time (UTC from /proc/stat) + kernel_seconds
+  - journal: __REALTIME_TIMESTAMP (UTC microseconds from systemd) 
+  - syslog: Local timestamp parsed and converted to UTC
+
 ## Metrics Query Architecture (Centralized)
 
 **Core System (`server/api/metric_queries.py`):**
@@ -184,20 +232,14 @@ TABLE_COLUMNS = [
 - Failed authentication attempts logged with client token prefixes
 - Admin authentication tracking for security monitoring
 
-**Error Handling & Design Philosophy:**
-- **Fail-Fast Architecture**: Explicit error propagation instead of defensive programming
-- **No Protective Fallbacks**: Code fails immediately when preconditions aren't met
-- **Clear Error Messages**: Stack traces enabled with `exc_info=True` for debugging
+**Implementation Details:**
+- **Error Handling**: Stack traces enabled with `exc_info=True` for debugging
 - **Precondition Checks**: Valid checks (e.g., `if (!this.chartManager) throw new Error()`) but no fallback defaults
 - **Explicit Dependencies**: Components assume required dependencies exist rather than checking and falling back
-- Clean client startup logging (reduced debug verbosity, essential INFO only)
-
-**UI Design Principles:**
-- **Single Source of Truth for Dimensions**: JavaScript constants as authoritative source for programmatic UI components
-- CSS custom properties generated from JS constants for styling consistency
-- Avoids duplicate hardcoded values across JS/CSS files
+- **Client Logging**: Clean startup logging (reduced debug verbosity, essential INFO only)
+- **UI Constants**: JavaScript constants as authoritative source for programmatic UI components  
+- **CSS Integration**: Custom properties generated from JS constants for styling consistency
 - **Pattern**: `const UI_CONSTANTS = { CHART_HEIGHT: 200 }; document.documentElement.style.setProperty('--chart-height', UI_CONSTANTS.CHART_HEIGHT + 'px');`
-- **Benefits**: Type safety, performance, maintainability, centralized control
 
 ## Installation & Operations
 

@@ -10,8 +10,8 @@ exporters:
   bmc_fan: true
   ipmicfg_psu: true
 log_monitoring:
-  enabled: false
-  sources: ["dmesg", "journal"]
-  severity_filter: "ERROR"
-  max_lines_per_cycle: 25
+  enabled: true
+  sources: ["dmesg", "journal", "syslog", "vast"]
+  severity_filter: "INFO"
+  max_lines_per_cycle: 50
 log_level: "INFO"
