@@ -1225,24 +1225,20 @@ class LogExporter:
         except Exception as e:
             raise Exception(f"Failed to save cursor positions: {e}")
     
-    def _parse_severity(self, line: str) -> Optional[str]:
+    def _parse_severity(self, line: str) -> str:
         """Extract severity level from log line."""
         line_upper = line.upper()
-        if any(word in line_upper for word in ['ERROR', 'ERR']):
+        if any(word in line_upper for word in ['ERROR', 'ERR', 'FATAL', 'FAIL', 'CRITICAL']):
             return 'ERROR'
         elif any(word in line_upper for word in ['WARN', 'WARNING']):
             return 'WARN'
-        elif any(word in line_upper for word in ['INFO']):
-            return 'INFO'
         elif any(word in line_upper for word in ['DEBUG']):
             return 'DEBUG'
-        return None
+        else:
+            return 'INFO'  # Default all unrecognized to INFO
     
-    def _should_include_severity(self, severity: Optional[str]) -> bool:
+    def _should_include_severity(self, severity: str) -> bool:
         """Check if log entry should be included based on severity filter."""
-        if not severity:
-            return True  # Include entries without detected severity
-            
         severity_levels = ['DEBUG', 'INFO', 'WARN', 'ERROR']
         try:
             min_level_idx = severity_levels.index(self.severity_filter)
@@ -1935,10 +1931,10 @@ class BaseLogExporter:
             return 'ERROR'
         elif any(word in line_lower for word in ['warn', 'warning']):
             return 'WARN'  
-        elif any(word in line_lower for word in ['info', 'information']):
-            return 'INFO'
-        else:
+        elif any(word in line_lower for word in ['debug']):
             return 'DEBUG'
+        else:
+            return 'INFO'  # Default to INFO for all unrecognized patterns
     
     def _should_include_severity(self, severity: str) -> bool:
         """Check if severity should be included based on filter."""

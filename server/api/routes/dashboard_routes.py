@@ -99,5 +99,66 @@ def create_dashboard_routes(auth_deps: AuthDependencies) -> APIRouter:
                 "timestamp": int(time.time())
             })
 
+    @router.get("/dashboard/client/{client_id}/modal", response_class=HTMLResponse, dependencies=[Depends(auth_deps.require_admin_auth)])
+    def get_client_detail_modal(client_id: int, request: Request):
+        """Get client detail modal content."""
+        logger.debug(f"Loading client detail modal for client {client_id}")
+        
+        # Log admin action
+        audit_logger.admin_action(
+            action="view_client_detail",
+            details={"client_id": client_id},
+            request=request
+        )
+        
+        try:
+            client_data = dashboard_controller.get_client_detail_data(client_id)
+            return templates.TemplateResponse("modals/client_detail_modal.html", {
+                "request": request,
+                **client_data
+            })
+            
+        except Exception as e:
+            logger.error(f"Client detail modal error: {e}")
+            return templates.TemplateResponse("modals/client_detail_modal.html", {
+                "request": request,
+                "client_id": client_id,
+                "error": str(e),
+                "timestamp": int(time.time())
+            })
+
+    @router.get("/dashboard/client/{client_id}/logs/{log_source}", response_class=HTMLResponse, dependencies=[Depends(auth_deps.require_admin_auth)])
+    def refresh_client_logs(client_id: int, log_source: str, request: Request):
+        """Refresh logs for a specific client and log source via htmx."""
+        logger.debug(f"Refreshing logs for client {client_id}, source {log_source}")
+        
+        # Log admin action
+        audit_logger.admin_action(
+            action="refresh_client_logs",
+            details={"client_id": client_id, "log_source": log_source},
+            request=request
+        )
+        
+        try:
+            logs = dashboard_controller.get_client_logs(client_id, log_source)
+            return templates.TemplateResponse("logs/log_entries.html", {
+                "request": request,
+                "logs": logs,
+                "client_id": client_id,
+                "log_source": log_source,
+                "timestamp": int(time.time())
+            })
+            
+        except Exception as e:
+            logger.error(f"Log refresh error: {e}")
+            return templates.TemplateResponse("logs/log_entries.html", {
+                "request": request,
+                "logs": [],
+                "client_id": client_id,
+                "log_source": log_source,
+                "error": str(e),
+                "timestamp": int(time.time())
+            })
+
 
     return router

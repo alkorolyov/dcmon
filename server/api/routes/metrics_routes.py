@@ -22,7 +22,7 @@ except ImportError:
     from models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
     from api.schemas import MetricsBatchRequest
     from api.dependencies import AuthDependencies
-    from api.metric_queries import MetricQueryBuilder, get_cpu_timeseries, get_vrm_timeseries
+    from api.metric_queries import MetricQueryBuilder
 
 logger = logging.getLogger("dcmon.server")
 
@@ -174,6 +174,94 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
         out.sort(key=lambda x: x["timestamp"], reverse=True)
         return {"metrics": out[:limit]}
 
+    @router.get("/api/timeseries/{metric_name}/rate")
+    def get_rate_timeseries(
+        metric_name: str,
+        seconds: int = Query(86400),  # Default 24 hours
+        client_ids: Optional[List[int]] = Query(None),
+        active_only: bool = Query(True),
+        since_timestamp: Optional[int] = Query(None),
+        until_timestamp: Optional[int] = Query(None),
+        labels: Optional[str] = Query(None),  # JSON string of label filters
+        aggregation: str = Query("sum"),
+        rate_window: int = Query(5),  # Rate window in minutes
+    ):
+        """
+        Get rate calculations for counter metrics.
+        Dedicated endpoint for rate calculations with clean separation.
+        """
+        try:
+            # Time range calculation
+            end_time = int(time.time())
+            
+            if since_timestamp is not None:
+                start_time = since_timestamp
+                if until_timestamp is not None:
+                    end_time = until_timestamp
+            else:
+                start_time = end_time - seconds
+            
+            # Parse metric names
+            metric_names = [name.strip() for name in metric_name.split(',')]
+            
+            # Parse label filters if provided
+            label_filters = None
+            if labels:
+                try:
+                    import json
+                    label_filters = json.loads(labels)
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f"Invalid label filters JSON: {labels}")
+            
+            # Use the rate calculation function  
+            from ..metric_queries import MetricQueryBuilder
+            df = MetricQueryBuilder.get_rate_timeseries(
+                metric_name=metric_names,
+                start_time=start_time,
+                end_time=end_time,
+                client_ids=client_ids,
+                label_filters=label_filters,
+                aggregation=aggregation,
+                rate_window_minutes=rate_window,
+                active_only=active_only
+            )
+            
+            # Convert DataFrame to API format using vectorized operations
+            if not df.empty:
+                # Convert DataFrame directly to grouped JSON structure
+                client_names = df.groupby('client_id')['client_name'].first().to_dict()
+                
+                # Vectorized groupby to create client data
+                client_data = {}
+                for client_id, group in df.groupby('client_id'):
+                    client_data[int(client_id)] = group[['timestamp', 'value']].to_dict('records')
+                
+                return {
+                    "data": client_data,
+                    "clients": {int(k): v for k, v in client_names.items()},
+                    "time_range": {"start": start_time, "end": end_time},
+                    "metric": metric_name,
+                    "aggregation": aggregation,
+                    "unit": "rate",
+                    "rate_window_minutes": rate_window
+                }
+            else:
+                return {
+                    "data": {},
+                    "clients": {},
+                    "time_range": {"start": start_time, "end": end_time},
+                    "metric": metric_name,
+                    "aggregation": aggregation,
+                    "unit": "rate",
+                    "rate_window_minutes": rate_window
+                }
+                
+        except Exception as e:
+            logger.error(f"Error in rate timeseries endpoint: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
     @router.get("/api/timeseries/{metric_name}")
     def get_timeseries(
         metric_name: str,
@@ -183,7 +271,7 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
         since_timestamp: Optional[int] = Query(None),  # For incremental queries
         until_timestamp: Optional[int] = Query(None),  # For gap-filling queries
         aggregation: str = Query("max", pattern="^(max|min|avg|sum|raw)$"),
-        sensor: Optional[str] = Query(None),  # Simple sensor filtering (e.g., "CPU")
+        labels: Optional[str] = Query(None),  # JSON string of label filters
         admin_auth: bool = Depends(auth_deps.require_admin_auth)
     ):
         """
@@ -191,9 +279,6 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
         Uses Basic Auth authentication compatible with dashboard.
         """
         try:
-            import time as time_module
-            query_start = time_module.time()
-            
             # Calculate time range
             end_time = int(time.time())
             
@@ -205,182 +290,61 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
             else:
                 start_time = end_time - seconds
             
-            # Get series for the requested metric(s) with smart client filtering
-            series_start = time_module.time()
-            
-            # Handle comma-separated metric names (e.g., "psu_temp1_celsius,psu_temp2_celsius")
+            # Parse metric names
             metric_names = [name.strip() for name in metric_name.split(',')]
-            if len(metric_names) == 1:
-                # Single metric - use exact match
-                series_query = (MetricSeries.select()
-                              .join(Client)
-                              .where(MetricSeries.metric_name == metric_names[0]))
-            else:
-                # Multiple metrics - use IN clause
-                series_query = (MetricSeries.select()
-                              .join(Client)
-                              .where(MetricSeries.metric_name.in_(metric_names)))
             
-            # Apply client filtering
-            if client_ids:
-                # Specific clients requested
-                series_query = series_query.where(MetricSeries.client.in_(client_ids))
-            elif active_only:
-                # Default: only active clients (seen in last hour)
-                one_hour_ago = int(time.time()) - 3600
-                series_query = series_query.where(
-                    (Client.last_seen.is_null(False)) &
-                    (Client.last_seen >= one_hour_ago)
-                )
+            # Create label filters from JSON labels parameter
+            label_filters = None
+            if labels:
+                try:
+                    label_filters = json.loads(labels)
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f"Invalid label filters JSON: {labels}")
+            
+            # Use the clean get_timeseries_data function
+            from ..metric_queries import MetricQueryBuilder
+            df = MetricQueryBuilder.get_timeseries_data(
+                metric_name=metric_names,
+                start_time=start_time,
+                end_time=end_time,
+                client_ids=client_ids,
+                label_filters=label_filters,
+                aggregation=aggregation
+            )
+            
+            # Convert DataFrame to API format using vectorized operations
+            if not df.empty:
+                # Convert DataFrame directly to grouped JSON structure
+                client_names = df.groupby('client_id')['client_name'].first().to_dict()
                 
-            series_list = list(series_query)
-            series_time = time_module.time() - series_start
-            
-            if not series_list:
-                return {"data": [[]], "series": [{}], "clients": {}, "metric": metric_name}
-            
-            # Use pandas for efficient time series processing
-            series_ids = [s.id for s in series_list]
-            
-            # Create client info DataFrame for vectorized merge (use 'series' to match .dicts() output)
-            client_info_df = pd.DataFrame([
-                {'series': s.id, 'client_id': s.client.id, 'client_name': s.client.hostname}
-                for s in series_list
-            ])
-            
-            # Vectorized data collection using pandas
-            vectorized_start = time_module.time()
-            
-            # Get int points using vectorized .dicts() approach
-            int_query = (MetricPointsInt.select()
-                        .where(
-                            (MetricPointsInt.series.in_(series_ids)) &
-                            (MetricPointsInt.timestamp >= start_time) &
-                            (MetricPointsInt.timestamp <= end_time)
-                        )
-                        .order_by(MetricPointsInt.timestamp)
-                        .dicts())
-            
-            int_df = pd.DataFrame(list(int_query)) if series_ids else pd.DataFrame()
-            
-            # Get float points using vectorized .dicts() approach
-            float_query = (MetricPointsFloat.select()
-                          .where(
-                              (MetricPointsFloat.series.in_(series_ids)) &
-                              (MetricPointsFloat.timestamp >= start_time) &
-                              (MetricPointsFloat.timestamp <= end_time)
-                          )
-                          .order_by(MetricPointsFloat.timestamp)
-                          .dicts())
-            
-            float_df = pd.DataFrame(list(float_query)) if series_ids else pd.DataFrame()
-            
-            # Combine int and float data vectorized
-            if not int_df.empty and not float_df.empty:
-                df = pd.concat([int_df, float_df], ignore_index=True)
-            elif not int_df.empty:
-                df = int_df
-            elif not float_df.empty:
-                df = float_df
+                # Vectorized groupby to create client data
+                client_data = {}
+                for client_id, group in df.groupby('client_id'):
+                    client_data[int(client_id)] = group[['timestamp', 'value']].to_dict('records')
+                
+                return {
+                    "data": client_data,
+                    "clients": {int(k): v for k, v in client_names.items()},
+                    "time_range": {"start": start_time, "end": end_time},
+                    "metric": metric_name,
+                    "aggregation": aggregation,
+                    "unit": ""
+                }
             else:
-                return {"data": {}, "clients": {}, "metric": metric_name, "time_range": {"start": start_time, "end": end_time}}
-            
-            # Vectorized client info merge - use 'series' field from .dicts() output
-            df = df.merge(client_info_df, on='series', how='left')
-            df['value'] = df['value'].astype(float)
-            
-            vectorized_time = time_module.time() - vectorized_start
-            
-            # Vectorized aggregation
-            if aggregation == "max":
-                agg_func = 'max'
-            elif aggregation == "min":
-                agg_func = 'min'
-            elif aggregation == "avg":
-                agg_func = 'mean'
-            elif aggregation == "sum":
-                agg_func = 'sum'
-            else:  # raw - take first value
-                agg_func = 'first'
-            
-            # Vectorized groupby aggregation
-            aggregated_df = df.groupby(['client_id', 'client_name', 'timestamp'])['value'].agg(agg_func).reset_index()
-            
-            # Create client names mapping
-            client_names = aggregated_df.groupby('client_id')['client_name'].first().to_dict()
-            
-            # Ultra-fast vectorized data structure creation
-            client_data = {}
-            for client_id in client_names.keys():
-                client_df = aggregated_df[aggregated_df['client_id'] == client_id]
-                if not client_df.empty:
-                    # Vectorized conversion - much faster than iterrows()
-                    client_data[client_id] = [
-                        {"timestamp": int(ts), "value": float(val)} 
-                        for ts, val in zip(client_df['timestamp'].values, client_df['value'].values)
-                    ]
-                else:
-                    client_data[client_id] = []
-            
-            # Determine unit based on metric name
-            unit_map = {
-                "gpu_temperature": "°C",
-                "cpu_temp_celsius": "°C", 
-                "cpu_usage_percent": "%",
-                "memory_usage_percent": "%",
-                "disk_usage_percent": "%",
-                "gpu_power_draw": "W",
-                "gpu_fan_speed": "%",
-                "ipmi_fan_rpm": " RPM"
-            }
-            unit = unit_map.get(metric_name, "")
-            
-            # Log timing information for performance monitoring
-            total_time = time_module.time() - query_start
-            
-            # Import format_elapsed_time for better console output
-            try:
-                from ...web.template_helpers import format_elapsed_time
-            except ImportError:
-                from web.template_helpers import format_elapsed_time
-            
-            logger.debug(f"Timeseries {metric_name}: {format_elapsed_time(total_time)}, {len(aggregated_df)} records")
-            
-            # Use specific helper functions for optimal sensor filtering
-            if metric_name == "ipmi_temp_celsius" and sensor:
-                if sensor.upper() == "CPU":
-                    # Use dedicated CPU helper with exact sensor names
-                    clean_df = get_cpu_timeseries(start_time, end_time, client_ids)
-                    if not clean_df.empty:
-                        client_data = {}
-                        client_names = {row['client_id']: row['client_name'] for _, row in clean_df[['client_id', 'client_name']].drop_duplicates().iterrows()}
-                        for client_id, group in clean_df.groupby('client_id'):
-                            client_data[client_id] = list(zip(group['timestamp'].tolist(), group['value'].tolist()))
-                        logger.debug(f"Timeseries {metric_name}: CPU HELPER used, {len(clean_df)} records")
-                        
-                elif sensor.upper() == "VRM":
-                    # Use dedicated VRM helper with exact sensor names  
-                    clean_df = get_vrm_timeseries(start_time, end_time, client_ids)
-                    if not clean_df.empty:
-                        client_data = {}
-                        client_names = {row['client_id']: row['client_name'] for _, row in clean_df[['client_id', 'client_name']].drop_duplicates().iterrows()}
-                        for client_id, group in clean_df.groupby('client_id'):
-                            client_data[client_id] = list(zip(group['timestamp'].tolist(), group['value'].tolist()))
-                        logger.debug(f"Timeseries {metric_name}: VRM HELPER used, {len(clean_df)} records")
-            
-            return {
-                "data": client_data,
-                "clients": client_names,
-                "time_range": {"start": start_time, "end": end_time},
-                "metric": metric_name,
-                "aggregation": aggregation,
-                "unit": ""
-            }
+                return {
+                    "data": {},
+                    "clients": {},
+                    "time_range": {"start": start_time, "end": end_time},
+                    "metric": metric_name,
+                    "aggregation": aggregation,
+                    "unit": ""
+                }
             
         except Exception as e:
             import traceback
             logger.error(f"Error getting {metric_name} timeseries: {e}")
             logger.error(f"Full traceback:\n{traceback.format_exc()}")
             raise HTTPException(status_code=500, detail="Failed to get timeseries data")
+
 
     return router

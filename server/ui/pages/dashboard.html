@@ -143,10 +143,23 @@
                 {% with chart_id='psu-fan-chart', chart_title='PSU Fan Speed' %}
                     {% include "charts/chart_container.html" %}
                 {% endwith %}
+                
+                <!-- Network Rate Chart -->
+                {% with chart_id='network-rate-chart', chart_title='Network Activity' %}
+                    {% include "charts/chart_container.html" %}
+                {% endwith %}
+                
+                <!-- Docker I/O Rate Chart -->
+                {% with chart_id='docker-io-chart', chart_title='Docker I/O Activity' %}
+                    {% include "charts/chart_container.html" %}
+                {% endwith %}
             </div>
         </div>
     </div>
 </div>
+
+<!-- Command Control Modal -->
+{% include "modals/command_control_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
@@ -155,6 +168,8 @@
     <script src="{{ url_for('static', path='ui/components/charts/timeseries_chart.js') }}"></script>
     <script src="{{ url_for('static', path='ui/components/tables/clients_table.js') }}"></script>
     <script src="{{ url_for('static', path='ui/components/controls/dashboard_controls.js') }}"></script>
+    <script src="{{ url_for('static', path='ui/components/modals/client_detail_modal.js') }}"></script>
+    <script src="{{ url_for('static', path='ui/components/modals/command_control_modal.js') }}"></script>
     
     <!-- Dashboard Initialization -->
     <script>
@@ -226,6 +241,14 @@
         const psuFanChart = TimeSeriesChart.createPsuFanChart('psu-fan-chart');
         psuFanChart.initialize();
         
+        // Network Rate Chart
+        const networkRateChart = TimeSeriesChart.createNetworkRateChart('network-rate-chart');
+        networkRateChart.initialize();
+        
+        // Docker I/O Rate Chart
+        const dockerIoChart = TimeSeriesChart.createDockerIoChart('docker-io-chart');
+        dockerIoChart.initialize();
+        
         // Store chart references globally for controls
         window.dashboardCharts = {
             gpuTemp: gpuTempChart,
@@ -235,7 +258,9 @@
             gpuFan: gpuFanChart,
             psuTemp: psuTempChart,
             psuPower: psuPowerChart,
-            psuFan: psuFanChart
+            psuFan: psuFanChart,
+            networkRate: networkRateChart,
+            dockerIo: dockerIoChart
         };
         
         console.log('All charts initialized');

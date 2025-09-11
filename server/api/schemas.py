@@ -24,6 +24,9 @@ class RegistrationRequest(BaseModel):
     ram_gb: Optional[int] = None
     cpu_cores: Optional[int] = None
     drives: Optional[List[Dict[str, Any]]] = None
+    # Vast.ai specific fields
+    vast_machine_id: Optional[str] = None
+    vast_port_range: Optional[str] = None
 
 
 class MetricRecord(BaseModel):
@@ -57,7 +60,3 @@ class MetricsBatchRequest(BaseModel):
     hw_hash: Optional[str] = None
 
 
-class CommandResultRequest(BaseModel):
-    command_id: str
-    status: str = Field("completed", pattern="^(completed|failed)$")
-    result: Optional[Dict[str, Any]] = None

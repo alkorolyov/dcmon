@@ -8,6 +8,7 @@
                         <tr>
                             <th class="col-status"></th>
                             <th class="col-hostname">Machine</th>
+                            <th class="col-control">Control</th>
                             {% for col in table_columns %}
                             <th class="{{ col.css_class }}">{{ col.header }}</th>
                             {% endfor %}
@@ -15,16 +16,31 @@
                     </thead>
                     <tbody>
                         {% for client in clients %}
-                        <tr class="client-row {{ 'online' if client.is_online else 'offline' }}">
+                        <tr class="client-row {{ 'online' if client.is_online else 'offline' }}" 
+                            data-client-id="{{ client.id }}">
                             <td class="col-status">
                                 <div class="status-dot {{ 'online' if client.is_online else 'offline' }}"></div>
                             </td>
-                            <td class="col-hostname">
+                            <td class="col-hostname" 
+                                onclick="window.clientDetailModal.open({{ client.id }})"
+                                title="Click to view detailed client information"
+                                style="cursor: pointer;">
                                 <div class="hostname-cell">{{ client.hostname }}</div>
+                            </td>
+                            <td class="col-control">
+                                <button class="control-btn" 
+                                        onclick="window.commandControlModal.open({{ client.id }}, '{{ client.hostname }}')"
+                                        title="Control client"
+                                        {{ 'disabled' if not client.is_online else '' }}>
+                                    ⚙️
+                                </button>
                             </td>
                             {% for col in table_columns %}
                                 {% set metric_data = client.metric_values[col.css_class] %}
-                                <td class="{{ col.css_class }} critical-data {{ metric_data.status }}">{{ metric_data.formatted }}</td>
+                                <td class="{{ col.css_class }} critical-data {{ metric_data.status }}"
+                                    onclick="window.clientDetailModal.open({{ client.id }})"
+                                    title="Click to view detailed client information"
+                                    style="cursor: pointer;">{{ metric_data.formatted }}</td>
                             {% endfor %}
                         </tr>
                         {% endfor %}

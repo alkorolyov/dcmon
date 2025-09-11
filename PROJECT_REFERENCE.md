@@ -19,7 +19,6 @@
 
 **Simplicity & Performance:**
 - Minimal dependencies (stdlib-focused client, FastAPI server)
-- Direct SQL queries over complex ORMs where performance matters
 - Component-based UI with single source of truth for dimensions
 - Zero public endpoints - admin-controlled registration only
 
@@ -125,7 +124,8 @@ server/
 - `GET /api/commands/{client_id}` - Command polling
 - `POST /api/commands` - Admin command creation  
 - `POST /api/command-results` - Command result submission
-- `GET /api/timeseries/{metric_name}` - Time series data (optimized format)
+- `GET /api/timeseries/{metric_name}` - Time series data with JSON label filters
+- `GET /api/timeseries/{metric_name}/rate` - Rate calculations for counter metrics
 - `GET /dashboard` - Web dashboard with smart caching
 - `GET /dashboard/refresh/clients` - HTMX table refresh endpoint
 - `GET /health` - Health check endpoint (admin auth required)
@@ -170,27 +170,39 @@ server/
 
 **Core System (`server/api/metric_queries.py`):**
 - `MetricQueryBuilder` class - single source of truth for all metric queries
-- Label filtering with exact key-value matching: `[{"sensor": "CPU Temp"}, {"sensor": "VRM Temp"}]`
+- **Centralized sensor mappings**: `CPU_SENSORS = [{"sensor": "CPU Temp"}, {"sensor": "TEMP_CPU"}]` for multi-motherboard support
+- **VRM sensor mappings**: `VRM_SENSORS = [{"sensor": "CPU_VRM Temp"}, {"sensor": "SOC_VRM Temp"}, ...]` for different VRM types
+- Label filtering with exact key-value matching using centralized constants
 - Optional aggregation support: `aggregation="max|min|avg"` or `None` for latest timestamp
-- Pandas vectorized operations (57.6x faster than iterrows)
+- **Vectorized pandas operations**: `.to_dict('records')` and `.groupby()` instead of slow `iterrows()`
 - Zero parameter mapping between dashboard config and query functions
 
 **Core Methods:**
 - `MetricQueryBuilder.get_latest_metric_value(client_id, metric_name, label_filters, aggregation)`
 - `MetricQueryBuilder.get_timeseries_data()` - full timeseries with aggregation
+- `MetricQueryBuilder.get_rate_timeseries()` - rate calculations for counter metrics
 - `MetricQueryBuilder.filter_series_by_labels()` - efficient label filtering
 
 ## Dashboard Architecture (Operation-Based Metrics)
 
 **Smart Table Configuration (`dashboard/controller.py`):**
 ```python
+# Import centralized sensor mappings from metric_queries
+from ..api.metric_queries import MetricQueryBuilder, CPU_SENSORS, VRM_SENSORS
+
 TABLE_COLUMNS = [
-    # Regular metrics - direct MetricQueryBuilder mapping
+    # Regular metrics using centralized sensor mappings
     {
         "metric_name": "ipmi_temp_celsius",
-        "label_filters": [{"sensor": "CPU Temp"}, {"sensor": "TEMP_CPU"}], 
+        "label_filters": CPU_SENSORS,  # [{"sensor": "CPU Temp"}, {"sensor": "TEMP_CPU"}]
         "aggregation": "max",
         "header": "CPU°C", "unit": "°", "css_class": "col-cpu-temp"
+    },
+    {
+        "metric_name": "ipmi_temp_celsius", 
+        "label_filters": VRM_SENSORS,  # Multi-VRM sensor support
+        "aggregation": "max",
+        "header": "VRM°C", "unit": "°", "css_class": "col-vrm-temp"
     },
     
     # Operation-based metrics - calculated values
@@ -237,6 +249,8 @@ TABLE_COLUMNS = [
 - **Precondition Checks**: Valid checks (e.g., `if (!this.chartManager) throw new Error()`) but no fallback defaults
 - **Explicit Dependencies**: Components assume required dependencies exist rather than checking and falling back
 - **Client Logging**: Clean startup logging (reduced debug verbosity, essential INFO only)
+- **Clean Code Standards**: All imports at top of files, no backward compatibility, vectorized pandas operations
+- **Centralized Constants**: Sensor mappings in single source of truth prevent code duplication across components
 - **UI Constants**: JavaScript constants as authoritative source for programmatic UI components  
 - **CSS Integration**: Custom properties generated from JS constants for styling consistency
 - **Pattern**: `const UI_CONSTANTS = { CHART_HEIGHT: 200 }; document.documentElement.style.setProperty('--chart-height', UI_CONSTANTS.CHART_HEIGHT + 'px');`

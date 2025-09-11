@@ -40,10 +40,12 @@ try:
     # when run as module
     from .auth import ClientAuth, setup_client_auth
     from .exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter, LogExporterManager
+    from .websocket_commands import start_websocket_command_server
 except ImportError:
     # when run as script from project root
     from auth import ClientAuth, setup_client_auth
     from exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter, LogExporterManager
+    from websocket_commands import start_websocket_command_server
 
 
 LOG = logging.getLogger("dcmon.client")
@@ -329,6 +331,30 @@ def create_hardware_hash(hardware_data: Dict[str, Any]) -> str:
     return hashlib.sha256(hash_string.encode()).hexdigest()
 
 
+def detect_vast_machine_id() -> Optional[str]:
+    """Detect Vast.ai machine ID from /var/lib/vastai_kaalia/machine_id."""
+    try:
+        vast_machine_id_path = Path("/var/lib/vastai_kaalia/machine_id")
+        if vast_machine_id_path.exists():
+            machine_id = vast_machine_id_path.read_text().strip()
+            return machine_id if machine_id else None
+        return None
+    except Exception:
+        return None
+
+
+def detect_vast_port_range() -> Optional[str]:
+    """Detect Vast.ai port range from /var/lib/vastai_kaalia/host_port_range."""
+    try:
+        vast_port_range_path = Path("/var/lib/vastai_kaalia/host_port_range")
+        if vast_port_range_path.exists():
+            port_range = vast_port_range_path.read_text().strip()
+            return port_range if port_range else None
+        return None
+    except Exception:
+        return None
+
+
 def detect_hardware() -> Dict[str, Any]:
     """Detect all hardware information."""
     machine_id = detect_machine_id()
@@ -458,6 +484,14 @@ def register_client_interactively(auth: ClientAuth, server_base: str, hostname: 
     # Add hardware info to registration request
     req.update(hardware)
     
+    # Detect Vast.ai information if available
+    vast_machine_id = detect_vast_machine_id()
+    vast_port_range = detect_vast_port_range()
+    if vast_machine_id:
+        req["vast_machine_id"] = vast_machine_id
+    if vast_port_range:
+        req["vast_port_range"] = vast_port_range
+    
     # Add admin token to request (only in memory)  
     req["admin_token"] = admin_token
     
@@ -528,55 +562,74 @@ async def run_client(config: ClientConfig) -> None:
     # Initialize log exporter manager with auth_dir and config
     log_exporter = LogExporterManager(Path(config.auth_dir), config.__dict__)
     
-    # Metrics loop with reconnection logging
-    LOG.info("client starting; posting metrics to %s every %ss", config.server, config.interval)
-    connection_failed = False
+    # Get client ID for WebSocket server (we'll need to modify this once we have proper client registration)
+    # For now, use a simple hash of the token as client_id
+    import hashlib
+    client_id = abs(hash(token)) % 10000  # Simple client ID generation
     
-    while True:
-        try:
-            batch = await metrics_collector.collect_metrics()
-            if not batch:
-                LOG.warning("no metrics collected")
-            
-            # Collect logs (non-async, synchronous collection)
-            log_entries = log_exporter.collect_new_logs()
-            logs_data = []
-            if log_entries:
-                logs_data = [
-                    {
-                        "log_source": entry.log_source,
-                        "log_timestamp": entry.log_timestamp,
-                        "content": entry.content,
-                        "severity": entry.severity
-                    }
-                    for entry in log_entries
-                ]
-            
-            res = send_metrics(config.server, token, batch, hw_hash, logs_data if logs_data else None)
-            LOG.debug("sent metrics: %s", res)
-            
-            # Log successful reconnection after failures
-            if connection_failed:
-                LOG.info("successfully reconnected to server: %s", config.server)
-                connection_failed = False
-                
-        except HTTPError as e:
-            connection_failed = True
+    async def metrics_loop():
+        """Main metrics collection loop."""
+        LOG.info("metrics loop starting; posting to %s every %ss", config.server, config.interval)
+        connection_failed = False
+        
+        while True:
             try:
-                msg = e.read().decode("utf-8")
-            except Exception:
-                msg = str(e)
-            LOG.error("HTTP %s error from server: %s", getattr(e, "code", "?"), msg)
-        except URLError as e:
-            connection_failed = True
-            LOG.error("failed to reach server: %s", e)
-        except Exception as e:
-            connection_failed = True
-            LOG.exception("unexpected error during metrics send: %s", e)
+                batch = await metrics_collector.collect_metrics()
+                if not batch:
+                    LOG.warning("no metrics collected")
+                
+                # Collect logs (non-async, synchronous collection)
+                log_entries = log_exporter.collect_new_logs()
+                logs_data = []
+                if log_entries:
+                    logs_data = [
+                        {
+                            "log_source": entry.log_source,
+                            "log_timestamp": entry.log_timestamp,
+                            "content": entry.content,
+                            "severity": entry.severity
+                        }
+                        for entry in log_entries
+                    ]
+                
+                res = send_metrics(config.server, token, batch, hw_hash, logs_data if logs_data else None)
+                LOG.debug("sent metrics: %s", res)
+                
+                # Log successful reconnection after failures
+                if connection_failed:
+                    LOG.info("successfully reconnected to server: %s", config.server)
+                    connection_failed = False
+                    
+            except HTTPError as e:
+                connection_failed = True
+                try:
+                    msg = e.read().decode("utf-8")
+                except Exception:
+                    msg = str(e)
+                LOG.error("HTTP %s error from server: %s", getattr(e, "code", "?"), msg)
+            except URLError as e:
+                connection_failed = True
+                LOG.error("failed to reach server: %s", e)
+            except Exception as e:
+                connection_failed = True
+                LOG.exception("unexpected error during metrics send: %s", e)
 
-        if config.once:
-            break
-        await asyncio.sleep(max(1, config.interval))
+            if config.once:
+                break
+            await asyncio.sleep(max(1, config.interval))
+    
+    # Start both metrics collection and WebSocket command server concurrently
+    LOG.info("starting dcmon client with metrics collection and WebSocket commands")
+    
+    if config.once:
+        # For --once mode, only run metrics
+        await metrics_loop()
+    else:
+        # Run both metrics and WebSocket command server concurrently
+        await asyncio.gather(
+            metrics_loop(),
+            start_websocket_command_server(config, client_id, token)
+        )
 
 
 def main():

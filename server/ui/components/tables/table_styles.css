@@ -66,6 +66,19 @@
 }
 
 /* Client Row States */
+.client-row {
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.client-row:hover {
+    background: rgba(0, 0, 0, 0.05) !important;
+}
+
+.client-row:active {
+    background: rgba(0, 0, 0, 0.08) !important;
+}
+
 .client-row.online {
     opacity: 1;
 }

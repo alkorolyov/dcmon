@@ -40,17 +40,40 @@ class TimeSeriesChart {
         const metricNameParam = Array.isArray(this.metricName) 
             ? this.metricName.join(',') 
             : this.metricName;
+        
+        // Use dedicated rate endpoint for rate calculations
+        const isRateChart = this.options.rate;
+        const apiEndpoint = isRateChart 
+            ? `/api/timeseries/${metricNameParam}/rate`
+            : `/api/timeseries/${metricNameParam}`;
+            
+        // Prepare API parameters based on chart type
+        let apiParams = {
+            seconds: this.options.seconds,
+            aggregation: this.options.aggregation
+        };
+        
+        if (isRateChart) {
+            // Rate-specific parameters
+            if (this.options.rate_window) apiParams.rate_window = this.options.rate_window;
+            if (this.options.labels) apiParams.labels = JSON.stringify(this.options.labels);
+        } else {
+            // Regular timeseries parameters
+            if (this.options.labels) {
+                // Multiple sensor labels (JSON array)
+                apiParams.labels = JSON.stringify(this.options.labels);
+            } else if (this.options.sensor) {
+                // Single sensor (backward compatibility)
+                apiParams.sensor = this.options.sensor;
+            }
+        }
             
         this.chartManager.getOrCreateChart(this.containerId, {
             title: this.options.title,
             yLabel: this.options.yLabel,
             unit: this.options.unit,
-            apiEndpoint: `/api/timeseries/${metricNameParam}`,
-            apiParams: {
-                seconds: this.options.seconds,
-                aggregation: this.options.aggregation,
-                ...(this.options.sensor && { sensor: this.options.sensor })
-            }
+            apiEndpoint: apiEndpoint,
+            apiParams: apiParams
         });
         
         console.log(`TimeSeriesChart initialized: ${this.metricName}`);
@@ -100,12 +123,14 @@ class TimeSeriesChart {
     }
     
     static createCpuTempChart(containerId) {
+        // Use centralized CPU sensor mapping
+        const CPU_SENSORS = [{"sensor": "CPU Temp"}, {"sensor": "TEMP_CPU"}];
         return new TimeSeriesChart(containerId, 'ipmi_temp_celsius', {
             title: 'CPU Temperature',
             yLabel: 'Temperature', 
             unit: '°C',
             aggregation: 'max',
-            sensor: 'CPU'  // Filter to CPU sensors only
+            labels: CPU_SENSORS
         });
     }
     
@@ -178,6 +203,28 @@ class TimeSeriesChart {
             yLabel: 'Fan Speed',
             unit: 'RPM',
             aggregation: 'max'
+        });
+    }
+    
+    static createNetworkRateChart(containerId) {
+        return new TimeSeriesChart(containerId, ['network_receive_bytes_total', 'network_transmit_bytes_total'], {
+            title: 'Network Activity',
+            yLabel: 'Network Rate',
+            unit: 'B/s',
+            aggregation: 'sum',
+            rate: true,
+            rate_window: 5
+        });
+    }
+    
+    static createDockerIoChart(containerId) {
+        return new TimeSeriesChart(containerId, ['disk_read_bytes_total', 'disk_write_bytes_total'], {
+            title: 'Disk I/O Activity', 
+            yLabel: 'I/O Rate',
+            unit: 'B/s',
+            aggregation: 'sum',
+            rate: true,
+            rate_window: 5
         });
     }
 }

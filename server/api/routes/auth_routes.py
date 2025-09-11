@@ -80,6 +80,9 @@ def create_auth_routes(auth_deps: AuthDependencies) -> APIRouter:
             ram_gb=registration_request.ram_gb,
             cpu_cores=registration_request.cpu_cores,
             drives=registration_request.drives,
+            # Vast.ai fields
+            vast_machine_id=registration_request.vast_machine_id,
+            vast_port_range=registration_request.vast_port_range,
         )
         if client_id is None:
             # Log failed registration (database error)

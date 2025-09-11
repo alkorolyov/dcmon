@@ -18,6 +18,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
+import peewee
 from peewee import (
     Model, SqliteDatabase, CharField, IntegerField, FloatField, TextField,
     ForeignKeyField, Check
@@ -57,6 +58,10 @@ class Client(BaseModel):
     ram_gb = IntegerField(null=True)     # Total RAM in GB
     cpu_cores = IntegerField(null=True)  # Number of CPU cores
     drives = JSONField(null=True)        # JSON array of all drives
+    
+    # Vast.ai specific fields
+    vast_machine_id = CharField(null=True)  # Vast.ai machine ID from /var/lib/vastai_kaalia/machine_id
+    vast_port_range = CharField(null=True)  # Vast.ai port range from /var/lib/vastai_kaalia/host_port_range
 
     class Meta:
         indexes = (
@@ -98,6 +103,9 @@ class Client(BaseModel):
             "ram_gb": self.ram_gb,
             "cpu_cores": self.cpu_cores,
             "drives": self.drives,
+            # Vast.ai fields
+            "vast_machine_id": self.vast_machine_id,
+            "vast_port_range": self.vast_port_range,
         }
 
 
@@ -206,43 +214,6 @@ class MetricPointsFloat(BaseModel):
         return deleted
 
 
-class Command(BaseModel):
-    """Server→Client command queue."""
-    client = ForeignKeyField(Client, backref="commands", on_delete="CASCADE", index=True)
-    command_type = CharField()
-    command_data = TextField()  # JSON
-    status = CharField(default="pending")
-    created_at = IntegerField()
-    executed_at = IntegerField(null=True)
-    result = TextField(null=True)  # JSON
-
-    class Meta:
-        indexes = (
-            (("client", "status"), False),
-        )
-
-    @classmethod
-    def get_pending_for_client(cls, client_id: int) -> List["Command"]:
-        return list(
-            cls.select()
-              .where((cls.client == client_id) & (cls.status == "pending"))
-              .order_by(cls.created_at)
-        )
-
-    def mark_completed(self, result: Dict[str, Any]) -> None:
-        import json
-        self.status = "completed"
-        self.executed_at = int(time.time())
-        self.result = json.dumps(result)
-        self.save()
-
-    def mark_failed(self, error: str) -> None:
-        import json
-        self.status = "failed"
-        self.executed_at = int(time.time())
-        self.result = json.dumps({"error": error})
-        self.save()
-
 
 class LogEntry(BaseModel):
     """Client log entries for troubleshooting."""
@@ -288,6 +259,27 @@ class LogEntry(BaseModel):
             
         return list(query.order_by(cls.log_timestamp.desc()).limit(limit))
 
+    @classmethod
+    def get_recent_logs_by_source(cls, client_id: int, log_source: str, limit: int = 50) -> List["LogEntry"]:
+        """Get recent logs for a specific client and log source."""
+        return list(
+            cls.select()
+            .where((cls.client == client_id) & (cls.log_source == log_source))
+            .order_by(cls.log_timestamp.desc())
+            .limit(limit)
+        )
+
+    @classmethod
+    def get_log_counts_by_source(cls, client_id: int, since_timestamp: Optional[int] = None) -> Dict[str, int]:
+        """Get log entry counts by source for a client, optionally since a timestamp."""
+        query = cls.select(cls.log_source, peewee.fn.COUNT(cls.id).alias('count')).where(cls.client == client_id)
+        
+        if since_timestamp:
+            query = query.where(cls.log_timestamp >= since_timestamp)
+            
+        results = query.group_by(cls.log_source)
+        return {row.log_source: row.count for row in results}
+
 
 class DatabaseManager:
     """DB lifecycle + minimal convenience ops."""
@@ -309,7 +301,7 @@ class DatabaseManager:
             database.execute_sql("PRAGMA cache_size=10000;")
             database.execute_sql("PRAGMA temp_store=MEMORY;")
 
-            database.create_tables([Client, MetricSeries, MetricPointsInt, MetricPointsFloat, Command, LogEntry], safe=True)
+            database.create_tables([Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry], safe=True)
             self.connected = True
             logger.info(f"database initialized: {self.db_path}")
             return True
@@ -341,6 +333,9 @@ class DatabaseManager:
         ram_gb: Optional[int] = None,
         cpu_cores: Optional[int] = None,
         drives: Optional[List[Dict[str, Any]]] = None,
+        # Vast.ai specific fields
+        vast_machine_id: Optional[str] = None,
+        vast_port_range: Optional[str] = None,
     ) -> Optional[int]:
         """
         Register a new client with hardware inventory.
@@ -365,6 +360,9 @@ class DatabaseManager:
                 ram_gb=ram_gb,
                 cpu_cores=cpu_cores,
                 drives=drives,
+                # Vast.ai fields
+                vast_machine_id=vast_machine_id,
+                vast_port_range=vast_port_range,
             )
             return int(client.id)
         except Exception as e:
@@ -379,7 +377,6 @@ class DatabaseManager:
                 "metric_series_total": MetricSeries.select().count(),
                 "metric_points_int": MetricPointsInt.select().count(),
                 "metric_points_float": MetricPointsFloat.select().count(),
-                "commands_pending": Command.select().where(Command.status == "pending").count(),
                 "database_size_mb": round(self.db_path.stat().st_size / 1024 / 1024, 2)
                 if self.db_path.exists() else 0,
             }
@@ -406,6 +403,5 @@ if __name__ == "__main__":
         # Test new schema
         series = MetricSeries.get_or_create_series(cid, "cpu_temp_c", None, "float")
         MetricPointsFloat.create(series=series, timestamp=int(time.time()), value=51.7)
-        pending = Command.get_pending_for_client(cid)
         stats = mgr.get_stats()
         mgr.close()
