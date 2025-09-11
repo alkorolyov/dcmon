@@ -111,17 +111,54 @@ def create_command_routes(auth_deps: AuthDependencies) -> APIRouter:
 
 async def execute_websocket_command(client_id: int, command_type: str, command_data: Dict[str, Any]) -> Dict[str, Any]:
     """Execute command on client via WebSocket connection."""
-    # TODO: Implement WebSocket client connection to send commands
-    # For now, return mock result
-    
     logger.info(f"Executing {command_type} command on client {client_id}")
     
-    # Simulate command execution
-    await asyncio.sleep(0.1)
-    
-    return {
-        "command_type": command_type,
-        "command_data": command_data,
-        "execution_time": 0.1,
-        "success": True
-    }
+    try:
+        # Get client info to determine WebSocket connection details
+        client = Client.get_by_id(client_id)
+        
+        # For now, assume client WebSocket is running on port 9000
+        # In a real implementation, we'd store this info during client registration
+        client_ws_url = f"ws://localhost:9000"  # This should be dynamic based on client
+        
+        # Connect to client WebSocket server
+        timeout_seconds = 10
+        async with websockets.connect(client_ws_url, timeout=timeout_seconds) as websocket:
+            # Send authentication
+            auth_message = {
+                "client_token": "mock_token_for_now"  # TODO: Get real client token
+            }
+            await websocket.send(json.dumps(auth_message))
+            
+            # Wait for auth response
+            auth_response = await websocket.recv()
+            auth_data = json.loads(auth_response)
+            
+            if auth_data.get("status") != "authenticated":
+                raise Exception("Client authentication failed")
+            
+            # Send command
+            command_message = {
+                "command_type": command_type,
+                "command_data": command_data
+            }
+            await websocket.send(json.dumps(command_message))
+            
+            # Wait for result
+            result_message = await websocket.recv()
+            result_data = json.loads(result_message)
+            
+            if result_data.get("status") == "completed":
+                return result_data.get("result", {})
+            else:
+                raise Exception(f"Command failed: {result_data.get('error', 'Unknown error')}")
+                
+    except websockets.exceptions.ConnectionRefused:
+        logger.error(f"Could not connect to client {client_id} WebSocket server")
+        raise Exception(f"Client {client_id} is not reachable via WebSocket")
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout connecting to client {client_id}")
+        raise Exception(f"Timeout connecting to client {client_id}")
+    except Exception as e:
+        logger.error(f"WebSocket command execution failed: {e}")
+        raise Exception(f"Command execution failed: {str(e)}")
