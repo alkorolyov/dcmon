@@ -44,6 +44,7 @@ class ClientAuth:
       - client.key    (PEM, 0600)
       - client.pub    (PEM, 0644)
       - client_token  (opaque token from server, 0600)
+      - client_id     (numeric database client ID, 0600)
     """
 
     def __init__(self, auth_dir: Path = Path("/etc/dcmon")) -> None:
@@ -51,6 +52,7 @@ class ClientAuth:
         self.private_key_file = self.auth_dir / "client.key"
         self.public_key_file = self.auth_dir / "client.pub"
         self.token_file = self.auth_dir / "client_token"
+        self.client_id_file = self.auth_dir / "client_id"
 
         if not CRYPTO_AVAILABLE:
             raise ImportError("cryptography package is required (pip install cryptography)")
@@ -189,6 +191,29 @@ class ClientAuth:
             return None
         except Exception as e:
             logger.error("failed to load client token: %s", e)
+            return None
+
+    # ---------- Client ID persistence ----------
+
+    def save_client_id(self, client_id: int) -> bool:
+        try:
+            self.auth_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self.client_id_file.write_text(str(client_id))
+            self.client_id_file.chmod(0o600)
+            logger.debug(f"saved client_id: {client_id}")
+            return True
+        except Exception as e:
+            logger.error("failed to save client_id: %s", e)
+            return False
+
+    def load_client_id(self) -> Optional[int]:
+        try:
+            if self.client_id_file.exists():
+                client_id_str = self.client_id_file.read_text().strip()
+                return int(client_id_str)
+            return None
+        except Exception as e:
+            logger.error("failed to load client_id: %s", e)
             return None
 
 

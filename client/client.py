@@ -40,12 +40,14 @@ try:
     # when run as module
     from .auth import ClientAuth, setup_client_auth
     from .exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter, LogExporterManager
-    from .websocket_commands import start_websocket_command_server
+    from .sockets import start_secure_websocket_command_client
+    from .utils import post_json, get_json
 except ImportError:
     # when run as script from project root
     from auth import ClientAuth, setup_client_auth
     from exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter, LogExporterManager
-    from websocket_commands import start_websocket_command_server
+    from sockets import start_secure_websocket_command_client
+    from utils import post_json, get_json
 
 
 LOG = logging.getLogger("dcmon.client")
@@ -115,39 +117,12 @@ class ClientConfig:
 
 # ---------------- HTTP helpers ----------------
 
-def _create_ssl_context():
-    """Create SSL context for HTTPS that auto-trusts server certificates"""
-    import ssl
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
-    return ssl_context
 
 
-def _post_json(url: str, data: Dict[str, Any], headers: Dict[str, str], timeout: int = 10) -> Dict[str, Any]:
-    body = json.dumps(data).encode("utf-8")
-    hdrs = {"Content-Type": "application/json"}
-    hdrs.update(headers or {})
-    req = Request(url, data=body, headers=hdrs, method="POST")
-    
-    # Use SSL context for HTTPS URLs
-    ssl_context = _create_ssl_context() if url.startswith("https://") else None
-    
-    with urlopen(req, timeout=timeout, context=ssl_context) as resp:
-        raw = resp.read().decode("utf-8")
-        return json.loads(raw) if raw else {}
+# _post_json moved to utils.py
 
 
-def _get_json(url: str, headers: Dict[str, str], timeout: int = 10) -> Dict[str, Any]:
-    """GET request helper with HTTPS auto-trust support"""
-    req = Request(url, headers=headers or {}, method="GET")
-    
-    # Use SSL context for HTTPS URLs
-    ssl_context = _create_ssl_context() if url.startswith("https://") else None
-    
-    with urlopen(req, timeout=timeout, context=ssl_context) as resp:
-        raw = resp.read().decode("utf-8")
-        return json.loads(raw) if raw else {}
+# _get_json moved to utils.py
 
 
 # ---------------- Registration UX ----------------
@@ -446,13 +421,14 @@ def send_metrics(server_base: str, client_token: str, metrics: List[Dict[str, An
         data["hw_hash"] = hw_hash
     if logs:
         data["logs"] = logs
-    return _post_json(url, data, headers)
+    return post_json(url, data, headers)
 
 
 def register_client_interactively(auth: ClientAuth, server_base: str, hostname: str, test_mode: bool = False) -> str:
     """
     Register client with server using admin authentication.
     In test mode, automatically uses dev token. In production, prompts for admin token.
+    Saves both client_token and client_id for future use.
     Returns client_token on success, raises SystemExit on failure.
     """
     if test_mode:
@@ -501,13 +477,21 @@ def register_client_interactively(auth: ClientAuth, server_base: str, hostname: 
     headers = {"Authorization": f"Basic {credentials}"}
     
     try:
-        response = _post_json(url, req, headers)
+        response = post_json(url, req, headers)
         client_token = response.get("client_token")
+        client_id = response.get("client_id")
+        
         if not client_token:
             raise SystemExit("ERROR: Server did not return client_token in registration response.")
+        if not client_id:
+            raise SystemExit("ERROR: Server did not return client_id in registration response.")
+        
+        # Save client_id for WebSocket connections
+        if not auth.save_client_id(client_id):
+            LOG.warning("Failed to save client_id - WebSocket commands may not work")
         
         print("✅ Client registered successfully!")
-        LOG.info("Client registered with server: %s", server_base)
+        LOG.info("Client registered with server: %s (client_id: %d)", server_base, client_id)
         return client_token
         
     except HTTPError as e:
@@ -562,10 +546,10 @@ async def run_client(config: ClientConfig) -> None:
     # Initialize log exporter manager with auth_dir and config
     log_exporter = LogExporterManager(Path(config.auth_dir), config.__dict__)
     
-    # Get client ID for WebSocket server (we'll need to modify this once we have proper client registration)
-    # For now, use a simple hash of the token as client_id
-    import hashlib
-    client_id = abs(hash(token)) % 10000  # Simple client ID generation
+    # Load client ID from file (saved during registration)
+    client_id = auth.load_client_id()
+    if client_id is None:
+        raise SystemExit("ERROR: client_id not found. Re-registration required.")
     
     async def metrics_loop():
         """Main metrics collection loop."""
@@ -625,10 +609,10 @@ async def run_client(config: ClientConfig) -> None:
         # For --once mode, only run metrics
         await metrics_loop()
     else:
-        # Run both metrics and WebSocket command server concurrently
+        # Run both metrics and secure WebSocket command client concurrently
         await asyncio.gather(
             metrics_loop(),
-            start_websocket_command_server(config, client_id, token)
+            start_secure_websocket_command_client(config, client_id, token)
         )
 
 
