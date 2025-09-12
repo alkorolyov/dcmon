@@ -32,8 +32,17 @@ class ChartManager {
         this.globalTimeRange = { start: null, end: null };
         this.isUpdatingRange = false;
         
-        // Grafana-style colors
-        this.colors = ["#73bf69", "#f2495c", "#5794f2", "#ff9830", "#9d7bd8", "#70dbed"];
+        // Grafana classic color palette
+        this.colors = [
+            "#73bf69",  // Green (confirmed Grafana color)
+            "#f2cc0c",  // Yellow (Grafana classic yellow)
+            "#3274d9",  // Blue (classic Grafana blue)
+            "#f2495c",  // Red (good contrast)
+            "#ff9830",  // Orange
+            "#9d7bd8",  // Purple
+            "#70dbed",  // Cyan
+            "#5794f2"   // Light blue
+        ];
         
         console.log('ChartManager initialized');
     }
