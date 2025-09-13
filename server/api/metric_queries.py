@@ -504,7 +504,7 @@ class MetricQueryBuilder:
         
         result_groups = []
         
-        for (client_id, client_name), group in df.groupby(['client_id', 'client_name']):
+        for (client_id, client_name, series_id), group in df.groupby(['client_id', 'client_name', 'series']):
             if len(group) < 2:
                 continue  # Need at least 2 points for rate calculation
                 

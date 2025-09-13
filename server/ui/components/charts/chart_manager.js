@@ -48,6 +48,17 @@ class ChartManager {
     }
     
     /**
+     * Format bytes per second with appropriate unit (B/s, KB/s, MB/s, GB/s)
+     */
+    formatBytesPerSecond(bytes) {
+        if (bytes === 0) return '0 B/s';
+        const k = 1024;
+        const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+    }
+    
+    /**
      * Create a new time series chart optimized for two-per-row layout
      * @param {string} containerId - DOM element ID to contain the chart
      * @param {Object} config - Chart configuration
@@ -97,6 +108,20 @@ class ChartManager {
             cursor: {
                 sync: {
                     key: 'timeseries-sync' // Sync cursor across all charts
+                },
+                points: {
+                    // Custom value formatting for tooltips
+                    values: (u, seriesIdx, idx) => {
+                        if (seriesIdx === 0) return null; // Skip x-axis
+                        const value = u.data[seriesIdx][idx];
+                        if (value === null || value === undefined) return null;
+                        
+                        // Special formatting for bytes per second
+                        if (config.unit === 'B/s') {
+                            return this.formatBytesPerSecond(value);
+                        }
+                        return value + (config.unit || '');
+                    }
                 }
             },
             scales: {
@@ -135,7 +160,13 @@ class ChartManager {
                     stroke: "#6e7680",
                     grid: { stroke: "#dcdee1", width: 1 },
                     ticks: { stroke: "#6e7680", width: 1 },
-                    values: (u, vals) => vals.map(v => v + (config.unit || ''))
+                    values: (u, vals) => vals.map(v => {
+                        // Special formatting for bytes per second
+                        if (config.unit === 'B/s') {
+                            return this.formatBytesPerSecond(v);
+                        }
+                        return v + (config.unit || '');
+                    })
                 }
             ],
             series: [
