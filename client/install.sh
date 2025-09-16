@@ -135,17 +135,39 @@ install_files() {
     
     local current_dir="$(dirname "$0")"
     
-    # Copy main client files
-    local client_files=("client.py" "exporters.py" "fans.py" "auth.py")
-    for file in "${client_files[@]}"; do
-        if [[ -f "$current_dir/$file" ]]; then
-            cp "$current_dir/$file" "/opt/dcmon/"
-            chmod 755 "/opt/dcmon/$file"
-            print_success "Installed $file"
-        else
-            print_warning "File $file not found in $current_dir"
+    # Copy all Python files automatically
+    local python_files_copied=0
+    for file in "$current_dir"/*.py; do
+        if [[ -f "$file" ]]; then
+            local filename=$(basename "$file")
+            cp "$file" "/opt/dcmon/"
+            chmod 755 "/opt/dcmon/$filename"
+            python_files_copied=$((python_files_copied + 1))
         fi
     done
+    
+    if [[ $python_files_copied -gt 0 ]]; then
+        print_success "Installed $python_files_copied Python files"
+    else
+        print_warning "No Python files found to install"
+    fi
+    
+    # Copy any Python modules/directories  
+    local modules_copied=0
+    for dir in "$current_dir"/*; do
+        if [[ -d "$dir" ]]; then
+            local dirname=$(basename "$dir")
+            # Skip common non-module directories
+            if [[ "$dirname" != "__pycache__" && "$dirname" != ".git" && "$dirname" != "venv" && "$dirname" != ".pytest_cache" ]]; then
+                cp -r "$dir" "/opt/dcmon/"
+                modules_copied=$((modules_copied + 1))
+            fi
+        fi
+    done
+    
+    if [[ $modules_copied -gt 0 ]]; then
+        print_success "Installed $modules_copied Python modules"
+    fi
     
     
     # Copy requirements.txt if exists
@@ -158,13 +180,22 @@ install_files() {
     local config_file="/etc/dcmon/config.yaml"
     if [[ ! -f "$config_file" ]]; then
         cat > "$config_file" << 'EOF'
-server_url: "http://your-server.com:8000"
-collection_interval: 30
+server: "https://your-server.com:8000"
+auth_dir: "/etc/dcmon"
+interval: 30
 exporters:
+  os: true
   ipmi: true
   apt: true
   nvme: true
   nvsmi: true
+  bmc_fan: true
+  ipmicfg_psu: true
+log_monitoring:
+  enabled: true
+  sources: ["dmesg", "journal", "syslog", "vast"]
+  severity_filter: "INFO"
+  max_lines_per_cycle: 50
 log_level: "INFO"
 EOF
         print_success "Created default config.yaml"
@@ -229,7 +260,7 @@ setup_server_and_register() {
         if python3 -c "
 import yaml
 with open('$config_file', 'r') as f: config = yaml.safe_load(f)
-config['server_url'] = '$server_url'
+config['server'] = '$server_url'
 with open('$config_file', 'w') as f: yaml.dump(config, f, default_flow_style=False)
 " 2>/dev/null; then
             print_success "Updated server URL to: $server_url"
@@ -311,7 +342,7 @@ import yaml
 try:
     with open('$config_file', 'r') as f:
         config = yaml.safe_load(f)
-    print(config.get('server_url', 'http://localhost:8000'))
+    print(config.get('server', 'https://localhost:8000'))
 except:
     print('http://localhost:8000')
 " 2>/dev/null || echo "http://localhost:8000"
@@ -393,11 +424,10 @@ retry_registration() {
     print_step "Attempting client registration..."
     
     # Attempt registration using the new client.py
-    if echo "$admin_token" | python3 /opt/dcmon/client.py --auth-dir /etc/dcmon --server "$server_url" --once; then
+    if python3 /opt/dcmon/client.py --config /etc/dcmon/config.yaml --register --admin-token "$admin_token"; then
         print_success "✅ Registration successful!"
         
-        # Set proper permissions
-        chown dcmon-client:dcmon-client /etc/dcmon/client_token
+        # Set proper permissions (run as root for hardware access)
         chmod 600 /etc/dcmon/client_token
         
         # Start/restart service
@@ -427,7 +457,7 @@ import yaml
 try:
     with open('$config_file', 'r') as f:
         config = yaml.safe_load(f) or {}
-    config['server_url'] = '$server_url'
+    config['server'] = '$server_url'
     with open('$config_file', 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
 except Exception as e:

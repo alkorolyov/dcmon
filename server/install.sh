@@ -107,16 +107,45 @@ install_files() {
     print_step "Installing server files..."
     
     local current_dir="$(dirname "$0")"
-    local server_files=("main.py" "models.py" "auth.py" "config_loader.py")
     
-    for file in "${server_files[@]}"; do
-        if [[ -f "$current_dir/$file" ]]; then
-            cp "$current_dir/$file" "/opt/dcmon-server/"
-            print_success "Installed $file"
-        else
-            print_warning "File $file not found in $current_dir"
+    # Copy all server Python files automatically  
+    local python_files_copied=0
+    for file in "$current_dir"/*.py; do
+        if [[ -f "$file" ]]; then
+            local filename=$(basename "$file")
+            cp "$file" "/opt/dcmon-server/"
+            python_files_copied=$((python_files_copied + 1))
         fi
     done
+    
+    if [[ $python_files_copied -gt 0 ]]; then
+        print_success "Installed $python_files_copied Python files"
+    fi
+    
+    # Copy all Python modules/directories automatically
+    local modules_copied=0
+    for dir in "$current_dir"/*; do
+        if [[ -d "$dir" ]]; then
+            local dirname=$(basename "$dir")
+            # Skip common non-module directories
+            if [[ "$dirname" != "__pycache__" && "$dirname" != ".git" && "$dirname" != "venv" && "$dirname" != ".pytest_cache" && "$dirname" != "node_modules" ]]; then
+                cp -r "$dir" "/opt/dcmon-server/"
+                modules_copied=$((modules_copied + 1))
+            fi
+        fi
+    done
+    
+    if [[ $modules_copied -gt 0 ]]; then
+        print_success "Installed $modules_copied Python modules"
+    fi
+    
+    # Copy requirements.txt
+    if [[ -f "$current_dir/requirements.txt" ]]; then
+        cp "$current_dir/requirements.txt" "/opt/dcmon-server/"
+        print_success "Installed requirements.txt"
+    else
+        print_warning "requirements.txt not found"
+    fi
     
     # Create main config file
     local main_config="/etc/dcmon-server/config.yaml"
@@ -271,7 +300,7 @@ User=dcmon-server
 Group=dcmon-server
 WorkingDirectory=/opt/dcmon-server
 Environment=PATH=/opt/dcmon-server/venv/bin
-ExecStart=/opt/dcmon-server/venv/bin/python main.py -c /etc/dcmon-server/config.yaml
+ExecStart=/opt/dcmon-server/venv/bin/python -m core.server -c /etc/dcmon-server/config.yaml
 Restart=always
 RestartSec=10
 StandardOutput=journal
