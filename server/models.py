@@ -170,6 +170,7 @@ class MetricPointsInt(BaseModel):
     """Integer metric points (about 70% of data)."""
     series = ForeignKeyField(MetricSeries, backref="int_points", on_delete="CASCADE", index=True)
     timestamp = IntegerField()
+    sent_at = IntegerField()  # When client sent this metric batch
     value = IntegerField()
 
     class Meta:
@@ -180,6 +181,7 @@ class MetricPointsInt(BaseModel):
         indexes = (
             (("series", "timestamp"), True),  # PRIMARY KEY equivalent
             (("timestamp",), False),  # For time-range queries
+            (("sent_at",), False),  # For latest batch queries
         )
 
     @classmethod
@@ -194,6 +196,7 @@ class MetricPointsFloat(BaseModel):
     """Float metric points (about 30% of data)."""
     series = ForeignKeyField(MetricSeries, backref="float_points", on_delete="CASCADE", index=True)
     timestamp = IntegerField()
+    sent_at = IntegerField()  # When client sent this metric batch
     value = FloatField()
 
     class Meta:
@@ -202,8 +205,9 @@ class MetricPointsFloat(BaseModel):
             # Composite primary key for uniqueness and performance
         ]
         indexes = (
-            (("series", "timestamp"), True),  # PRIMARY KEY equivalent  
+            (("series", "timestamp"), True),  # PRIMARY KEY equivalent
             (("timestamp",), False),  # For time-range queries
+            (("sent_at",), False),  # For latest batch queries
         )
 
     @classmethod

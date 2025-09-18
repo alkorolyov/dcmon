@@ -35,33 +35,36 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
     def submit_metrics(body: MetricsBatchRequest, client: Client = Depends(auth_deps.require_client_auth)):
         """Submit metrics batch from client."""
         now = int(time.time())
+        sent_at = now  # When this batch was submitted
         int_points = []
         float_points = []
-        
+
         for m in body.metrics:
             if m.timestamp > now + 300:
                 raise HTTPException(status_code=422, detail=f"metric timestamp too far in future: {m.timestamp}")
-            
+
             # Get or create metric series
             labels_json = json.dumps(m.labels) if m.labels else None
             series = MetricSeries.get_or_create_series(
                 client_id=client.id,
-                metric_name=m.metric_name, 
+                metric_name=m.metric_name,
                 labels=labels_json,
                 value_type=m.value_type
             )
-            
+
             # Prepare data for appropriate points table
             if m.value_type == "int":
                 int_points.append({
-                    "series": series.id,
+                    "series_id": series.id,
                     "timestamp": m.timestamp,
+                    "sent_at": sent_at,
                     "value": int(m.value)
                 })
             else:  # float
                 float_points.append({
-                    "series": series.id,
+                    "series_id": series.id,
                     "timestamp": m.timestamp,
+                    "sent_at": sent_at,
                     "value": m.value
                 })
         

@@ -92,75 +92,77 @@ class MetricQueryBuilder:
             
             series_ids = [s.id for s in series_list]
             
+            # New logic: find latest sent_at for this client, then get metrics from that batch only
+            # First find the latest sent_at for this client across all series
+            latest_sent_at_int = (MetricPointsInt.select(fn.MAX(MetricPointsInt.sent_at))
+                                .join(MetricSeries)
+                                .where(MetricSeries.client == client_id)
+                                .scalar())
+
+            latest_sent_at_float = (MetricPointsFloat.select(fn.MAX(MetricPointsFloat.sent_at))
+                                  .join(MetricSeries)
+                                  .where(MetricSeries.client == client_id)
+                                  .scalar())
+
+            # Get the most recent sent_at across both tables
+            sent_ats = [ts for ts in [latest_sent_at_int, latest_sent_at_float] if ts is not None]
+            if not sent_ats:
+                return None
+
+            latest_sent_at = max(sent_ats)
+
+            # Now get metrics from the latest batch only
             if aggregation is None:
-                # Original behavior: latest timestamp from any series
                 # Try int points first
                 latest_point = (MetricPointsInt.select()
-                              .where(MetricPointsInt.series.in_(series_ids))
-                              .order_by(MetricPointsInt.timestamp.desc())
+                              .where(
+                                  (MetricPointsInt.series.in_(series_ids)) &
+                                  (MetricPointsInt.sent_at == latest_sent_at)
+                              )
                               .first())
-                
+
                 if latest_point:
                     return float(latest_point.value)
-                
+
                 # Try float points
                 latest_point = (MetricPointsFloat.select()
-                              .where(MetricPointsFloat.series.in_(series_ids))
-                              .order_by(MetricPointsFloat.timestamp.desc())
+                              .where(
+                                  (MetricPointsFloat.series.in_(series_ids)) &
+                                  (MetricPointsFloat.sent_at == latest_sent_at)
+                              )
                               .first())
-                
+
                 if latest_point:
                     return float(latest_point.value)
-                    
+
                 return None
             else:
-                # Aggregation behavior: find latest timestamp, then aggregate across all series at that timestamp
-                import time
-                
-                # Find the latest timestamp across all series (int and float)
-                latest_int_ts = (MetricPointsInt.select(MetricPointsInt.timestamp)
-                               .where(MetricPointsInt.series.in_(series_ids))
-                               .order_by(MetricPointsInt.timestamp.desc())
-                               .scalar())
-                
-                latest_float_ts = (MetricPointsFloat.select(MetricPointsFloat.timestamp)
-                                 .where(MetricPointsFloat.series.in_(series_ids))
-                                 .order_by(MetricPointsFloat.timestamp.desc())
-                                 .scalar())
-                
-                # Get the most recent timestamp between int and float
-                timestamps = [ts for ts in [latest_int_ts, latest_float_ts] if ts is not None]
-                if not timestamps:
-                    return None
-                    
-                latest_timestamp = max(timestamps)
-                
-                # Get all values at the latest timestamp
+                # Aggregation: get all values from latest batch and aggregate
                 values = []
-                
-                # Get int values at latest timestamp
+
+                # Get int values from latest batch
                 int_points = (MetricPointsInt.select()
                             .where(
                                 (MetricPointsInt.series.in_(series_ids)) &
-                                (MetricPointsInt.timestamp == latest_timestamp)
+                                (MetricPointsInt.sent_at == latest_sent_at)
                             ))
-                
+
                 for point in int_points:
                     values.append(float(point.value))
-                
-                # Get float values at latest timestamp
+
+                # Get float values from latest batch
                 float_points = (MetricPointsFloat.select()
                               .where(
                                   (MetricPointsFloat.series.in_(series_ids)) &
-                                  (MetricPointsFloat.timestamp == latest_timestamp)
+                                  (MetricPointsFloat.sent_at == latest_sent_at)
                               ))
-                
+
                 for point in float_points:
                     values.append(float(point.value))
-                
+
                 if not values:
                     return None
-                
+
                 # Apply aggregation
                 if aggregation == "max":
                     return max(values)
