@@ -54,8 +54,9 @@
 - Production mode prompts for secure admin token
 
 **Database (Peewee ORM):**
-- Models: Client, MetricSeries, MetricPoints{Int,Float}, Command, LogEntry
-- Integer storage optimization (20-30% reduction)
+- Models: Client, MetricSeries, MetricPoints, Command, LogEntry
+- Unified REAL storage for all metrics (preserves decimal precision)
+- Latest-batch sensor detection (shows "—" for missing sensors)
 - 7-day retention with automatic cleanup
 
 **Transport (HTTPS):**
@@ -84,9 +85,7 @@ client/
 └── config*.yaml      # Configuration files (production + test)
 
 server/
-├── main.py           # Entry point only (58 lines)
-├── models.py         # Peewee ORM models
-├── auth.py          # Authentication service
+├── server.py         # Entry point only (58 lines)
 ├── install.sh        # Server installation script
 ├── uninstall.sh      # Server uninstallation script
 ├── config*.yaml      # Configuration files (production + test)
@@ -94,7 +93,9 @@ server/
 ├── audit.log         # Security audit log (generated)
 ├── core/
 │   ├── config.py     # Configuration management
-│   ├── server.py     # FastAPI app factory & lifespan
+│   ├── app.py        # FastAPI app factory & lifespan
+│   ├── models.py     # Peewee ORM models
+│   ├── auth.py       # Authentication service
 │   └── audit.py      # Security audit logging system
 ├── api/
 │   ├── dependencies.py         # Auth dependencies
