@@ -15,9 +15,9 @@ import operator
 
 # Support running as script or as package
 try:
-    from ..models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat
+    from ..core.models import Client, MetricSeries, MetricPoints
 except ImportError:
-    from models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat
+    from core.models import Client, MetricSeries, MetricPoints
 
 logger = logging.getLogger("dcmon.server")
 
@@ -92,89 +92,42 @@ class MetricQueryBuilder:
             
             series_ids = [s.id for s in series_list]
             
-            # New logic: find latest sent_at for this client, then get metrics from that batch only
-            # First find the latest sent_at for this client across all series
-            latest_sent_at_int = (MetricPointsInt.select(fn.MAX(MetricPointsInt.sent_at))
-                                .join(MetricSeries)
-                                .where(MetricSeries.client == client_id)
-                                .scalar())
+            # Simple logic: find latest sent_at for this client, then get metrics from that batch only
+            # Find the latest sent_at for this client
+            latest_sent_at = (MetricPoints.select(fn.MAX(MetricPoints.sent_at))
+                            .join(MetricSeries)
+                            .where(MetricSeries.client == client_id)
+                            .scalar())
 
-            latest_sent_at_float = (MetricPointsFloat.select(fn.MAX(MetricPointsFloat.sent_at))
-                                  .join(MetricSeries)
-                                  .where(MetricSeries.client == client_id)
-                                  .scalar())
-
-            # Get the most recent sent_at across both tables
-            sent_ats = [ts for ts in [latest_sent_at_int, latest_sent_at_float] if ts is not None]
-            if not sent_ats:
+            if latest_sent_at is None:
                 return None
 
-            latest_sent_at = max(sent_ats)
+            # Query metrics from the latest batch only
+            points = (MetricPoints.select()
+                    .where(
+                        (MetricPoints.series.in_(series_ids)) &
+                        (MetricPoints.sent_at == latest_sent_at)
+                    ))
 
-            # Now get metrics from the latest batch only
+            values = [point.value for point in points]
+
+            if not values:
+                return None
+
+            # Apply aggregation if requested
             if aggregation is None:
-                # Try int points first
-                latest_point = (MetricPointsInt.select()
-                              .where(
-                                  (MetricPointsInt.series.in_(series_ids)) &
-                                  (MetricPointsInt.sent_at == latest_sent_at)
-                              )
-                              .first())
-
-                if latest_point:
-                    return float(latest_point.value)
-
-                # Try float points
-                latest_point = (MetricPointsFloat.select()
-                              .where(
-                                  (MetricPointsFloat.series.in_(series_ids)) &
-                                  (MetricPointsFloat.sent_at == latest_sent_at)
-                              )
-                              .first())
-
-                if latest_point:
-                    return float(latest_point.value)
-
-                return None
+                return values[0]  # Return first value if no aggregation
+            elif aggregation == "max":
+                return max(values)
+            elif aggregation == "min":
+                return min(values)
+            elif aggregation == "avg":
+                return sum(values) / len(values)
+            elif aggregation == "sum":
+                return sum(values)
             else:
-                # Aggregation: get all values from latest batch and aggregate
-                values = []
-
-                # Get int values from latest batch
-                int_points = (MetricPointsInt.select()
-                            .where(
-                                (MetricPointsInt.series.in_(series_ids)) &
-                                (MetricPointsInt.sent_at == latest_sent_at)
-                            ))
-
-                for point in int_points:
-                    values.append(float(point.value))
-
-                # Get float values from latest batch
-                float_points = (MetricPointsFloat.select()
-                              .where(
-                                  (MetricPointsFloat.series.in_(series_ids)) &
-                                  (MetricPointsFloat.sent_at == latest_sent_at)
-                              ))
-
-                for point in float_points:
-                    values.append(float(point.value))
-
-                if not values:
-                    return None
-
-                # Apply aggregation
-                if aggregation == "max":
-                    return max(values)
-                elif aggregation == "min":
-                    return min(values)
-                elif aggregation == "avg":
-                    return sum(values) / len(values)
-                elif aggregation == "sum":
-                    return sum(values)
-                else:
-                    logger.warning(f"Unknown aggregation type: {aggregation}, using max")
-                    return max(values)
+                logger.warning(f"Unknown aggregation type: {aggregation}, using max")
+                return max(values)
             
         except Exception as e:
             logger.debug(f"Error getting metric {metric_name} for client {client_id}: {e}")
@@ -236,42 +189,25 @@ class MetricQueryBuilder:
                 for s in series_list
             ])
             
-            
-            # Get int and float points
-            int_query = (MetricPointsInt.select()
-                        .where(
-                            (MetricPointsInt.series.in_(series_ids)) &
-                            (MetricPointsInt.timestamp >= start_time) &
-                            (MetricPointsInt.timestamp <= end_time)
-                        )
-                        .order_by(MetricPointsInt.timestamp)
-                        .dicts())
-            
-            float_query = (MetricPointsFloat.select()
-                          .where(
-                              (MetricPointsFloat.series.in_(series_ids)) &
-                              (MetricPointsFloat.timestamp >= start_time) &
-                              (MetricPointsFloat.timestamp <= end_time)
-                          )
-                          .order_by(MetricPointsFloat.timestamp)
-                          .dicts())
-            
-            int_df = pd.DataFrame(list(int_query)) if series_ids else pd.DataFrame()
-            float_df = pd.DataFrame(list(float_query)) if series_ids else pd.DataFrame()
-            
-            # Combine data
-            if not int_df.empty and not float_df.empty:
-                df = pd.concat([int_df, float_df], ignore_index=True)
-            elif not int_df.empty:
-                df = int_df
-            elif not float_df.empty:
-                df = float_df
-            else:
+
+            # Get all metric points from single table
+            query = (MetricPoints.select()
+                    .where(
+                        (MetricPoints.series.in_(series_ids)) &
+                        (MetricPoints.timestamp >= start_time) &
+                        (MetricPoints.timestamp <= end_time)
+                    )
+                    .order_by(MetricPoints.timestamp)
+                    .dicts())
+
+            df = pd.DataFrame(list(query)) if series_ids else pd.DataFrame()
+
+            if df.empty:
                 return pd.DataFrame()
-            
+
             # Merge with client info using 'series' column
             df = df.merge(client_info_df, on='series', how='left')
-            
+
             return df
             
         except Exception as e:
@@ -347,25 +283,13 @@ class MetricQueryBuilder:
                 # Create friendly label identifier
                 label_id = MetricQueryBuilder._create_friendly_label(labels_dict, metric_name)
                 
-                # Get latest value for this series
-                latest_value = None
-                
-                # Try integer points first
-                if series.value_type == "int":
-                    latest_point = (MetricPointsInt.select()
-                                  .where(MetricPointsInt.series == series.id)
-                                  .order_by(MetricPointsInt.timestamp.desc())
-                                  .first())
-                    if latest_point:
-                        latest_value = float(latest_point.value)
-                else:
-                    # Try float points
-                    latest_point = (MetricPointsFloat.select()
-                                  .where(MetricPointsFloat.series == series.id) 
-                                  .order_by(MetricPointsFloat.timestamp.desc())
-                                  .first())
-                    if latest_point:
-                        latest_value = float(latest_point.value)
+                # Get latest value for this series from single table
+                latest_point = (MetricPoints.select()
+                              .where(MetricPoints.series == series.id)
+                              .order_by(MetricPoints.timestamp.desc())
+                              .first())
+
+                latest_value = latest_point.value if latest_point else None
                 
                 # Store in structured dict
                 if latest_value is not None:

@@ -8,14 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 # Support running as script or as package
 try:
-    from ...models import db_manager, Client
-    from ...auth import AuthService
+    from ...core.models import db_manager, Client
+    from ...core.auth import AuthService
     from ..schemas import RegistrationRequest
     from ..dependencies import AuthDependencies
     from ...core.audit import audit_logger
 except ImportError:
-    from models import db_manager, Client
-    from auth import AuthService
+    from core.models import db_manager, Client
+    from core.auth import AuthService
     from api.schemas import RegistrationRequest
     from api.dependencies import AuthDependencies
     from core.audit import audit_logger

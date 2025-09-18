@@ -14,11 +14,11 @@ from pydantic import BaseModel
 
 # Support running as script or as package
 try:
-    from ...models import Client
+    from ...core.models import Client
     from ..dependencies import AuthDependencies
     from ...core.audit import audit_logger
 except ImportError:
-    from models import Client
+    from core.models import Client
     from api.dependencies import AuthDependencies
     from core.audit import audit_logger
 

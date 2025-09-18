@@ -14,12 +14,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 # Support running as script or as package
 try:
-    from ...models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
+    from ...core.models import Client, MetricSeries, MetricPoints, LogEntry
     from ..schemas import MetricsBatchRequest
     from ..dependencies import AuthDependencies
     from ..metric_queries import MetricQueryBuilder, get_cpu_timeseries, get_vrm_timeseries
 except ImportError:
-    from models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
+    from core.models import Client, MetricSeries, MetricPoints, LogEntry
     from api.schemas import MetricsBatchRequest
     from api.dependencies import AuthDependencies
     from api.metric_queries import MetricQueryBuilder
@@ -36,8 +36,7 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
         """Submit metrics batch from client."""
         now = int(time.time())
         sent_at = now  # When this batch was submitted
-        int_points = []
-        float_points = []
+        metric_points = []
 
         for m in body.metrics:
             if m.timestamp > now + 300:
@@ -48,35 +47,22 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
             series = MetricSeries.get_or_create_series(
                 client_id=client.id,
                 metric_name=m.metric_name,
-                labels=labels_json,
-                value_type=m.value_type
+                labels=labels_json
             )
 
-            # Prepare data for appropriate points table
-            if m.value_type == "int":
-                int_points.append({
-                    "series_id": series.id,
-                    "timestamp": m.timestamp,
-                    "sent_at": sent_at,
-                    "value": int(m.value)
-                })
-            else:  # float
-                float_points.append({
-                    "series_id": series.id,
-                    "timestamp": m.timestamp,
-                    "sent_at": sent_at,
-                    "value": m.value
-                })
+            # All values stored as REAL in single table
+            metric_points.append({
+                "series_id": series.id,
+                "timestamp": m.timestamp,
+                "sent_at": sent_at,
+                "value": float(m.value)  # Convert all to float for REAL storage
+            })
         
-        # Bulk insert points
+        # Bulk insert points into single table
         inserted_total = 0
-        if int_points:
-            inserted_int = MetricPointsInt.insert_many(int_points).on_conflict_ignore().execute()
-            inserted_total += int(inserted_int or 0)
-            
-        if float_points:
-            inserted_float = MetricPointsFloat.insert_many(float_points).on_conflict_ignore().execute()
-            inserted_total += int(inserted_float or 0)
+        if metric_points:
+            inserted_total = MetricPoints.insert_many(metric_points).on_conflict_ignore().execute()
+            inserted_total = int(inserted_total or 0)
 
         # Process log entries
         inserted_logs = 0

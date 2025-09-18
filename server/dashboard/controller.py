@@ -12,11 +12,11 @@ from datetime import datetime, timedelta
 
 # Support running as script or as package
 try:
-    from ..models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
+    from ..core.models import Client, MetricSeries, MetricPoints, LogEntry
     from ..api.metric_queries import MetricQueryBuilder, CPU_SENSORS, VRM_SENSORS
     from ..web.template_helpers import format_bytes
 except ImportError:
-    from models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
+    from core.models import Client, MetricSeries, MetricPoints, LogEntry
     from api.metric_queries import MetricQueryBuilder, CPU_SENSORS, VRM_SENSORS
     from web.template_helpers import format_bytes
 
@@ -233,9 +233,7 @@ class DashboardController:
                 online_clients += 1
         
         # Get total metrics count
-        total_int_metrics = MetricPointsInt.select().count()
-        total_float_metrics = MetricPointsFloat.select().count()
-        total_metrics = total_int_metrics + total_float_metrics
+        total_metrics = MetricPoints.select().count()
         
         return {
             "total_clients": total_clients,
