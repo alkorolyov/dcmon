@@ -36,6 +36,14 @@
 - Ensures consistency across distributed clients in different timezones
 - Follows industry best practices (AWS, Google Cloud, enterprise monitoring)
 
+**Frontend Component Design:**
+- **Feature-per-Directory**: Each UI component self-contained in `ui/components/[feature]/`
+- **Co-location**: HTML templates, JavaScript, and CSS files together per component
+- **Hierarchical Modals**: Scalable `modals/[modal_name]/` structure for future expansion
+- **Consistent Naming**: `[feature]_[type].[ext]` pattern (e.g., `chart_manager.js`, `table_styles.css`)
+- **Global State Management**: ChartManager singleton for cross-chart color consistency
+- **No Framework Dependencies**: Vanilla JavaScript + HTMX for lightweight, maintainable code
+
 ## Core Technical Decisions
 
 **Authentication (SSH-like):**
@@ -102,17 +110,33 @@ server/
 │   └── template_helpers.py     # Jinja2 filters & time formatting utils
 ├── certificates/
 │   └── certificate_manager.py # SSL/TLS handling
-├── ui/               # Component-based frontend with fail-fast architecture
-│   ├── components/   # Modular UI components
-│   │   ├── charts/   # Chart system (chart_manager.js, timeseries_chart.js, styles)
-│   │   ├── controls/ # Dashboard controls (auto-refresh, time ranges, JS + CSS)
-│   │   └── tables/   # Data tables (clients_table.html/.js, HTMX integration)
-│   ├── pages/        # Main templates (dashboard.html, base.html)  
-│   ├── scripts/      # Utilities (ApiClient class)
-│   └── styles/       # Design system (variables.css, dark mode)
-├── static/           # Static asset serving
-│   ├── js/           # JavaScript files
-│   └── css/          # CSS stylesheets
+├── ui/               # Component-based frontend with hierarchical organization
+│   ├── components/   # Self-contained UI components (feature-per-directory)
+│   │   ├── charts/   # Chart system with color consistency
+│   │   │   ├── chart_manager.js      # Singleton with global client color mapping
+│   │   │   ├── timeseries_chart.js   # Individual chart factory
+│   │   │   ├── chart_container.html  # Chart HTML template  
+│   │   │   └── chart_styles.css      # Chart-specific styles
+│   │   ├── controls/ # Dashboard controls (time ranges, auto-refresh)
+│   │   │   ├── dashboard_controls.js # Control logic
+│   │   │   └── control_styles.css    # Control styling
+│   │   ├── logs/     # Log viewing components
+│   │   │   └── log_entries.html      # Log display template
+│   │   ├── modals/   # Modal components (hierarchical structure)
+│   │   │   └── client_detail/        # Client detail modal (self-contained)
+│   │   │       ├── modal.html        # Main modal template
+│   │   │       ├── modal.js          # Modal behavior & interactions
+│   │   │       ├── info_tab.html     # Client information tab
+│   │   │       ├── logs_tab.html     # Client logs tab
+│   │   │       └── commands_tab.html # Remote commands tab
+│   │   └── tables/   # Data table components
+│   │       ├── clients_table.html    # Main clients table template
+│   │       ├── clients_table.js      # Table logic & HTMX integration
+│   │       └── table_styles.css      # Table styling
+│   ├── pages/        # Main page templates (dashboard.html, base.html)  
+│   ├── scripts/      # Shared utilities (ApiClient class)
+│   └── styles/       # Global design system (variables.css, dark mode)
+├── static/           # Static asset serving (FastAPI StaticFiles mount)
 └── dashboard/        # Dashboard logic
     ├── controller.py # Data processing with centralized operations
     └── config.py     # Metric thresholds
@@ -230,13 +254,15 @@ TABLE_COLUMNS = [
 - Regular metrics → direct `MetricQueryBuilder` pass-through
 - **No legacy code**: All individual metric functions removed for centralized approach
 
-**Component Architecture**: 
-- Modular HTML/CSS/JS components with HTMX integration
-- Professional design system with CSS variables, dark mode support
-- Chart system: ChartManager singleton with persistent cache + TimeSeriesChart factory
-- Smart caching: Incremental queries (~3 records) vs full queries (~60k records)
-- **Time Range Selector**: 13 ranges (5m-90d) with intelligent cache filtering and axis rescaling
-- Layout: Header (Total, Online, Time range, Refresh) + Critical Health table
+**Component-Based Frontend Architecture**: 
+- **Self-Contained Components**: Each feature organized in its own directory (`ui/components/[feature]/`)
+- **Co-Located Assets**: HTML templates, JavaScript, and CSS together per component
+- **Hierarchical Modals**: Scalable modal structure (`modals/client_detail/`, `modals/metric_config/`)
+- **Color Consistency**: Global client color mapping across all charts via ChartManager singleton
+- **Smart Chart System**: Persistent cache, incremental updates, synchronized zoom/pan
+- **HTMX Integration**: Partial page updates with component-based templates
+- **Design System**: CSS variables, dark mode support, consistent naming (`[feature]_[type].[ext]`)
+- **Future-Ready**: Easy to add new features following established component patterns
 
 **Security & Audit:**
 - Centralized audit logging system (`core/audit.py`) for authentication attempts
@@ -253,7 +279,8 @@ TABLE_COLUMNS = [
 - **Centralized Constants**: Sensor mappings in single source of truth prevent code duplication across components
 - **UI Constants**: JavaScript constants as authoritative source for programmatic UI components  
 - **CSS Integration**: Custom properties generated from JS constants for styling consistency
-- **Pattern**: `const UI_CONSTANTS = { CHART_HEIGHT: 200 }; document.documentElement.style.setProperty('--chart-height', UI_CONSTANTS.CHART_HEIGHT + 'px');`
+- **Chart Color Consistency**: Global client hostname → color mapping ensures same client has same color across all charts
+- **Component Pattern**: `const UI_CONSTANTS = { CHART_HEIGHT: 200 }; document.documentElement.style.setProperty('--chart-height', UI_CONSTANTS.CHART_HEIGHT + 'px');`
 
 ## Installation & Operations
 
