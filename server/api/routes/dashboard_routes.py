@@ -113,14 +113,14 @@ def create_dashboard_routes(auth_deps: AuthDependencies) -> APIRouter:
         
         try:
             client_data = dashboard_controller.get_client_detail_data(client_id)
-            return templates.TemplateResponse("modals/client_detail_modal.html", {
+            return templates.TemplateResponse("components/modals/client_detail/modal.html", {
                 "request": request,
                 **client_data
             })
             
         except Exception as e:
             logger.error(f"Client detail modal error: {e}")
-            return templates.TemplateResponse("modals/client_detail_modal.html", {
+            return templates.TemplateResponse("components/modals/client_detail/modal.html", {
                 "request": request,
                 "client_id": client_id,
                 "error": str(e),
@@ -141,7 +141,7 @@ def create_dashboard_routes(auth_deps: AuthDependencies) -> APIRouter:
         
         try:
             logs = dashboard_controller.get_client_logs(client_id, log_source)
-            return templates.TemplateResponse("logs/log_entries.html", {
+            return templates.TemplateResponse("components/logs/log_entries.html", {
                 "request": request,
                 "logs": logs,
                 "client_id": client_id,
@@ -151,7 +151,7 @@ def create_dashboard_routes(auth_deps: AuthDependencies) -> APIRouter:
             
         except Exception as e:
             logger.error(f"Log refresh error: {e}")
-            return templates.TemplateResponse("logs/log_entries.html", {
+            return templates.TemplateResponse("components/logs/log_entries.html", {
                 "request": request,
                 "logs": [],
                 "client_id": client_id,

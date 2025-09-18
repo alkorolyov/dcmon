@@ -44,7 +44,25 @@ class ChartManager {
             "#5794f2"   // Light blue
         ];
         
+        // Global client color mapping for consistency across all charts
+        this.clientColorMap = new Map();
+        
         console.log('ChartManager initialized');
+    }
+    
+    /**
+     * Get consistent color for a client hostname across all charts
+     * @param {string} clientHostname - Client hostname (e.g., "srv01", "srv02")
+     * @returns {string} - Hex color code
+     */
+    getClientColor(clientHostname) {
+        if (!this.clientColorMap.has(clientHostname)) {
+            // Assign next available color in a stable order
+            const colorIndex = this.clientColorMap.size % this.colors.length;
+            this.clientColorMap.set(clientHostname, this.colors[colorIndex]);
+            console.log(`Assigned color ${this.colors[colorIndex]} to client ${clientHostname} (index: ${colorIndex})`);
+        }
+        return this.clientColorMap.get(clientHostname);
     }
     
     /**
@@ -455,9 +473,15 @@ class ChartManager {
         const uplotData = [sortedTimestamps]; // x-axis
         const seriesConfig = [{}]; // x-axis config (empty)
         
-        // Process each client's data
-        let colorIndex = 0;
-        for (const [clientId, clientPoints] of Object.entries(backendData.data)) {
+        // Sort client entries by hostname for consistent ordering
+        const sortedClientEntries = Object.entries(backendData.data).sort((a, b) => {
+            const hostnameA = backendData.clients[a[0]] || `Client ${a[0]}`;
+            const hostnameB = backendData.clients[b[0]] || `Client ${b[0]}`;
+            return hostnameA.localeCompare(hostnameB);
+        });
+        
+        // Process each client's data with consistent colors
+        for (const [clientId, clientPoints] of sortedClientEntries) {
             // Create a map of timestamp -> value for this client
             const pointMap = new Map(clientPoints.map(p => [p.timestamp, p.value]));
             
@@ -465,15 +489,17 @@ class ChartManager {
             const series = sortedTimestamps.map(timestamp => pointMap.get(timestamp) ?? null);
             uplotData.push(series);
             
-            // Add series configuration
+            // Get client hostname for consistent color assignment
+            const clientHostname = backendData.clients[clientId] || `Client ${clientId}`;
+            
+            // Add series configuration with consistent color
             seriesConfig.push({
-                label: backendData.clients[clientId] || `Client ${clientId}`,
-                stroke: this.colors[colorIndex % this.colors.length],
+                label: clientHostname,
+                stroke: this.getClientColor(clientHostname),
                 width: 1, // THINNER LINES
                 show: true,
                 spanGaps: true // Connect lines across missing data points
             });
-            colorIndex++;
         }
         
         return {
@@ -755,6 +781,25 @@ class ChartManager {
      */
     getChartInfo(chartId) {
         return this.charts.get(chartId);
+    }
+    
+    /**
+     * Get current client color mappings for debugging
+     */
+    getClientColorMappings() {
+        const mappings = {};
+        for (const [hostname, color] of this.clientColorMap.entries()) {
+            mappings[hostname] = color;
+        }
+        return mappings;
+    }
+    
+    /**
+     * Reset client color mappings (useful for debugging or if color assignments get messy)
+     */
+    resetClientColors() {
+        console.log('Resetting client color mappings');
+        this.clientColorMap.clear();
     }
 }
 
