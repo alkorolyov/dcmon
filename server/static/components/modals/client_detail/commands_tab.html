@@ -1,0 +1,50 @@
+<div class="commands-section">
+    <!-- Command Groups Row -->
+    <div class="command-groups-row">
+        <!-- Fan Control -->
+        <div class="command-group">
+            <h4>BMC Fan Mode</h4>
+            <div class="command-controls">
+                <div class="speed-controls-row">
+                    <button class="command-btn secondary" onclick="setFanMode('STANDARD', {{ client_id }})">Standard</button>
+                    <button class="command-btn secondary" onclick="setFanMode('FULL_SPEED', {{ client_id }})">Full Speed</button>
+                    <button class="command-btn secondary" onclick="setFanMode('OPTIMAL', {{ client_id }})">Optimal</button>
+                    <button class="command-btn secondary" onclick="setFanMode('HEAVY_IO', {{ client_id }})">Heavy I/O</button>
+                </div>
+                
+                <!-- Custom Fan Speed Controls -->
+                <div class="fan-speed-controls">
+                    <label class="control-label">Custom Fan Speeds:</label>
+                    <div class="speed-controls-row">
+                        <button class="command-btn secondary" onclick="setFanSpeeds(60, {{ client_id }})">60%</button>
+                        <button class="command-btn secondary" onclick="setFanSpeeds(80, {{ client_id }})">80%</button>
+                        <button class="command-btn secondary" onclick="setFanSpeeds(100, {{ client_id }})">100%</button>
+                        <input type="number" id="custom-speed-{{ client_id }}" min="20" max="100" placeholder="20-100%" class="speed-input" onkeypress="if(event.key==='Enter') setCustomFanSpeed({{ client_id }})">
+                        <button class="command-btn secondary" onclick="setCustomFanSpeed({{ client_id }})">Set</button>
+                        <button class="command-btn primary" onclick="getFanStatus({{ client_id }})">Get Fan Status</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Info -->
+        <div class="command-group">
+            <h4>System Information</h4>
+            <div class="command-controls">
+                <div class="speed-controls-row">
+                    <button class="command-btn primary" onclick="getSystemInfo('basic', {{ client_id }})">Basic Info</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Command Results -->
+    <div class="command-results-section">
+        <h4>Command Results</h4>
+        <div class="command-results" id="command-results-{{ client_id }}">
+            <div class="results-container" id="results-container-{{ client_id }}">
+                <div class="no-results">No commands executed yet</div>
+            </div>
+        </div>
+    </div>
+</div>
