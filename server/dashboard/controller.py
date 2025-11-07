@@ -387,9 +387,8 @@ class DashboardController:
             
             if current_value is None:
                 return None
-                
+
             # Get previous value from time_window seconds ago
-            from api.metric_queries import MetricQueryBuilder
             previous_data = MetricQueryBuilder.get_timeseries_data(
                 metric_name=metric_name,
                 start_time=current_time - time_window - 60,  # Extra buffer for data availability
@@ -398,8 +397,8 @@ class DashboardController:
                 aggregation=aggregation,
                 label_filters=label_filters
             )
-            
-            if not previous_data or len(previous_data) == 0:
+
+            if previous_data.empty:
                 return None
             
             # Find the closest previous value
@@ -477,7 +476,6 @@ class DashboardController:
             is_online = (client.last_seen and (current_time - client.last_seen) < 300)
             
             # Get all metrics for this client using single batch query
-            from api.metric_queries import MetricQueryBuilder
             raw_metrics = MetricQueryBuilder.get_all_latest_metrics_for_client(client_id)
             
             # Organize metrics by hardware device for detailed display
