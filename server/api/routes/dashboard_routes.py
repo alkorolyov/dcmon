@@ -113,14 +113,14 @@ def create_dashboard_routes(auth_deps: AuthDependencies) -> APIRouter:
         
         try:
             client_data = dashboard_controller.get_client_detail_data(client_id)
-            return templates.TemplateResponse("modals/client_detail_modal.html", {
+            return templates.TemplateResponse("modals/client_detail/modal.html", {
                 "request": request,
                 **client_data
             })
-            
+
         except Exception as e:
             logger.error(f"Client detail modal error: {e}")
-            return templates.TemplateResponse("modals/client_detail_modal.html", {
+            return templates.TemplateResponse("modals/client_detail/modal.html", {
                 "request": request,
                 "client_id": client_id,
                 "error": str(e),
