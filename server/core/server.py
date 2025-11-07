@@ -142,7 +142,9 @@ def create_app(config: ServerConfig) -> FastAPI:
 
     # Mount static files BEFORE routes (more specific paths first)
     from fastapi.staticfiles import StaticFiles
-    app.mount("/static", StaticFiles(directory="ui"), name="static")
+    # Mount at /static pointing to current directory (server/)
+    # Templates use path='ui/styles/...' which resolves to /static/ui/styles/... -> ui/styles/...
+    app.mount("/static", StaticFiles(directory="."), name="static")
 
     # Include all route modules (auth_deps is ready)
     app.include_router(create_auth_routes(auth_deps))
