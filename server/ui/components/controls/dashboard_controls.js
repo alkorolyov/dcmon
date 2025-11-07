@@ -8,7 +8,7 @@ class DashboardControls {
     constructor() {
         this.refreshInterval = null;
         this.currentRefreshRate = 30; // seconds
-        this.currentTimeRange = '10m'; // Changed from '1d' to prevent memory crash on page load
+        this.currentTimeRange = '1d'; // Default to 1 day
         this.activeDropdown = null;
         
         this.initialize();

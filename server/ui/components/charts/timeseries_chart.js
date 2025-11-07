@@ -24,6 +24,10 @@ class TimeSeriesChart {
      * Get global time range from dashboard controls
      */
     getGlobalTimeRange() {
+        // Default to 1 day (86400 seconds) if dashboard controls not ready
+        if (!window.dashboardControls || !window.dashboardControls.currentTimeRange) {
+            return 86400; // 1 day in seconds
+        }
         return window.dashboardControls.parseTimeRangeToSeconds(window.dashboardControls.currentTimeRange);
     }
     

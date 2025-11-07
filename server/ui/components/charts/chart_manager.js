@@ -31,11 +31,53 @@ class ChartManager {
         this.charts = new Map();
         this.globalTimeRange = { start: null, end: null };
         this.isUpdatingRange = false;
-        
+
         // Grafana-style colors
         this.colors = ["#73bf69", "#f2495c", "#5794f2", "#ff9830", "#9d7bd8", "#70dbed"];
-        
+
         console.log('ChartManager initialized');
+    }
+
+    /**
+     * Format large numbers with abbreviations (K, M, G, T)
+     * Useful for bytes/s and other large values
+     */
+    formatNumber(value, unit = '') {
+        const absValue = Math.abs(value);
+
+        // For byte-related units, use 1024-based (binary) prefixes
+        if (unit.toLowerCase().includes('b/s') || unit.toLowerCase().includes('bytes')) {
+            if (absValue >= 1099511627776) { // 1 TiB
+                return (value / 1099511627776).toFixed(2) + ' TB/s';
+            } else if (absValue >= 1073741824) { // 1 GiB
+                return (value / 1073741824).toFixed(2) + ' GB/s';
+            } else if (absValue >= 1048576) { // 1 MiB
+                return (value / 1048576).toFixed(2) + ' MB/s';
+            } else if (absValue >= 1024) { // 1 KiB
+                return (value / 1024).toFixed(2) + ' KB/s';
+            }
+            return value.toFixed(2) + ' B/s';
+        } else {
+            // For other units, use 1000-based (decimal) prefixes
+            if (absValue >= 1000000000000) { // 1T
+                return (value / 1000000000000).toFixed(2) + ' T' + unit;
+            } else if (absValue >= 1000000000) { // 1G
+                return (value / 1000000000).toFixed(2) + ' G' + unit;
+            } else if (absValue >= 1000000) { // 1M
+                return (value / 1000000).toFixed(2) + ' M' + unit;
+            } else if (absValue >= 1000) { // 1K
+                return (value / 1000).toFixed(2) + ' K' + unit;
+            }
+        }
+
+        // For small values, show with appropriate precision
+        if (absValue < 10) {
+            return value.toFixed(2) + (unit ? ' ' + unit : '');
+        } else if (absValue < 100) {
+            return value.toFixed(1) + (unit ? ' ' + unit : '');
+        } else {
+            return Math.round(value) + (unit ? ' ' + unit : '');
+        }
     }
     
     /**
@@ -97,8 +139,16 @@ class ChartManager {
                 y: {
                     auto: true,
                     range: (u, min, max) => {
-                        // Add 5% padding to y-axis range
-                        const pad = (max - min) * 0.05;
+                        // Add 10% padding to y-axis range
+                        const range = max - min;
+                        const pad = range * 0.10;
+
+                        // If flat line (min == max), use ±10% of the value or ±1 as minimum range
+                        if (range === 0 || range < 0.001) {
+                            const minRange = Math.max(Math.abs(min) * 0.10, 1);
+                            return [min - minRange, max + minRange];
+                        }
+
                         return [min - pad, max + pad];
                     }
                 }
@@ -122,11 +172,11 @@ class ChartManager {
                 },
                 {
                     // Y-axis (no label - title has the info)
-                    size: 70,        // Increased from default to fit labels like "6000RPM"
+                    size: 90,        // Increased to fit abbreviated labels like "1.23 MB/s"
                     stroke: "#6e7680",
                     grid: { stroke: "#dcdee1", width: 1 },
                     ticks: { stroke: "#6e7680", width: 1 },
-                    values: (u, vals) => vals.map(v => v + (config.unit || ''))
+                    values: (u, vals) => vals.map(v => this.formatNumber(v, config.unit || ''))
                 }
             ],
             series: [
@@ -405,9 +455,17 @@ class ChartManager {
         // Collect all unique timestamps across all clients
         const allTimestamps = new Set();
         Object.values(backendData.data).forEach(clientPoints => {
-            clientPoints.forEach(point => allTimestamps.add(point.timestamp));
+            if (!Array.isArray(clientPoints)) {
+                console.error('Invalid clientPoints data:', clientPoints);
+                return;
+            }
+            clientPoints.forEach(point => {
+                if (point && typeof point.timestamp === 'number' && !isNaN(point.timestamp)) {
+                    allTimestamps.add(point.timestamp);
+                }
+            });
         });
-        
+
         // Sort timestamps for x-axis
         const sortedTimestamps = Array.from(allTimestamps).sort((a, b) => a - b);
         
