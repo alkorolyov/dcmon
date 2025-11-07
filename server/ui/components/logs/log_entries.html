@@ -1,0 +1,20 @@
+<!-- Log Entries Component - HTMX loadable log entries -->
+{% if error %}
+<div class="log-error">
+    <p>Error loading logs: {{ error }}</p>
+</div>
+{% elif logs %}
+<div class="log-entries">
+    {% for log in logs %}
+    <div class="log-entry log-{{ log.severity_class }}">
+        <span class="log-timestamp">{{ log.timestamp_human }}</span>
+        <span class="log-severity log-severity-{{ log.severity_class }}">{{ log.severity or 'INFO' }}</span>
+        <span class="log-content">{{ log.content }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="log-empty">
+    <p>No logs available for {{ log_source }}</p>
+</div>
+{% endif %}
