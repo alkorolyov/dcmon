@@ -35,8 +35,7 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
     def submit_metrics(body: MetricsBatchRequest, client: Client = Depends(auth_deps.require_client_auth)):
         """Submit metrics batch from client."""
         now = int(time.time())
-        int_points = []
-        float_points = []
+        float_points = []  # All metrics stored as float per architecture decision
         
         for m in body.metrics:
             if m.timestamp > now + 300:
@@ -51,26 +50,15 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
                 value_type=m.value_type
             )
             
-            # Prepare data for appropriate points table
-            if m.value_type == "int":
-                int_points.append({
-                    "series": series.id,
-                    "timestamp": m.timestamp,
-                    "value": int(m.value)
-                })
-            else:  # float
-                float_points.append({
-                    "series": series.id,
-                    "timestamp": m.timestamp,
-                    "value": m.value
-                })
-        
-        # Bulk insert points
+            # Store all metrics as float (architecture decision)
+            float_points.append({
+                "series": series.id,
+                "timestamp": m.timestamp,
+                "value": float(m.value)
+            })
+
+        # Bulk insert points (all as float)
         inserted_total = 0
-        if int_points:
-            inserted_int = MetricPointsInt.insert_many(int_points).on_conflict_ignore().execute()
-            inserted_total += int(inserted_int or 0)
-            
         if float_points:
             inserted_float = MetricPointsFloat.insert_many(float_points).on_conflict_ignore().execute()
             inserted_total += int(inserted_float or 0)
@@ -151,24 +139,8 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
                 "labels": json.loads(series.labels) if series.labels else None,
             })
         
-        # Query int points
-        int_query = MetricPointsInt.select().where(MetricPointsInt.series.in_(series_ids))
-        if start:
-            int_query = int_query.where(MetricPointsInt.timestamp >= start)
-        if end:
-            int_query = int_query.where(MetricPointsInt.timestamp <= end)
-        int_query = int_query.order_by(MetricPointsInt.timestamp.desc()).limit(limit // 2)
-        
-        for point in int_query:
-            series = next(s for s in series_list if s.id == point.series.id)
-            out.append({
-                "client_id": series.client.id,
-                "timestamp": point.timestamp,
-                "metric_name": series.metric_name,
-                "value_float": None,
-                "value_int": point.value,
-                "labels": json.loads(series.labels) if series.labels else None,
-            })
+        # Query float points (all metrics stored as float per architecture decision)
+        # Note: int_query removed as all data is now stored as float
         
         # Sort by timestamp descending
         out.sort(key=lambda x: x["timestamp"], reverse=True)

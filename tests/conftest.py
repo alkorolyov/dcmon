@@ -112,20 +112,20 @@ def sample_metrics(test_db, sample_client):
             value=45.0 + (i * 1.5)
         )
 
-        # CPU temp varies between 60-70°C
-        MetricPointsInt.create(
+        # CPU temp varies between 60-70°C (use float table)
+        MetricPointsFloat.create(
             series=temp_series,
             timestamp=timestamp,
             sent_at=sent_at,
-            value=62 + i
+            value=float(62 + i)
         )
 
-        # VRM temp varies between 50-58°C
-        MetricPointsInt.create(
+        # VRM temp varies between 50-58°C (use float table)
+        MetricPointsFloat.create(
             series=vrm_series,
             timestamp=timestamp,
             sent_at=sent_at,
-            value=50 + i
+            value=float(50 + i)
         )
 
     return {
@@ -169,18 +169,19 @@ def sample_counter_metrics(test_db, sample_client):
     for i in range(10):
         timestamp = now - ((9 - i) * 30)  # Every 30 seconds
 
-        MetricPointsInt.create(
+        # Use float table (architecture decision: all metrics stored as float)
+        MetricPointsFloat.create(
             series=rx_series,
             timestamp=timestamp,
             sent_at=timestamp,
-            value=base_rx + (i * 30 * rate_rx)  # Monotonically increasing
+            value=float(base_rx + (i * 30 * rate_rx))  # Monotonically increasing
         )
 
-        MetricPointsInt.create(
+        MetricPointsFloat.create(
             series=tx_series,
             timestamp=timestamp,
             sent_at=timestamp,
-            value=base_tx + (i * 30 * rate_tx)
+            value=float(base_tx + (i * 30 * rate_tx))
         )
 
     return {
@@ -215,18 +216,18 @@ def sample_disk_metrics(test_db, sample_client):
     total_bytes = 100 * 1024**3  # 100 GB
     used_bytes = 75 * 1024**3    # 75 GB
 
-    MetricPointsInt.create(
+    MetricPointsFloat.create(
         series=used_series,
         timestamp=now,
         sent_at=now,
-        value=used_bytes
+        value=float(used_bytes)
     )
 
-    MetricPointsInt.create(
+    MetricPointsFloat.create(
         series=total_series,
         timestamp=now,
         sent_at=now,
-        value=total_bytes
+        value=float(total_bytes)
     )
 
     return {

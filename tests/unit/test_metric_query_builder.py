@@ -9,7 +9,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'server'))
 
 from api.metric_queries import MetricQueryBuilder, CPU_SENSORS, VRM_SENSORS
-from models import MetricSeries, Client
+from models import MetricSeries, Client, MetricPointsFloat
 
 
 class TestFilterSeriesByLabels:
@@ -374,7 +374,6 @@ class TestCalculateRatesFromRawData:
 class TestGetRateTimeseries:
     """Test end-to-end rate timeseries"""
 
-    @pytest.mark.skip(reason="Rate aggregation across metrics needs investigation")
     def test_get_rate_timeseries_with_aggregation(self, test_db, sample_counter_metrics):
         """Get rate timeseries with aggregation across multiple metrics"""
         import time
@@ -392,5 +391,104 @@ class TestGetRateTimeseries:
         )
 
         assert not df.empty
-        # Should have positive rates
-        assert all(df['value'] >= 0)
+        # Should have positive rates (no negative rates from mixing counters)
+        assert all(df['value'] >= 0), f"Found negative rates: {df[df['value'] < 0]['value'].tolist()}"
+
+        # Expected combined rate should be roughly sum of individual rates
+        expected_combined = sample_counter_metrics['expected_rate_rx'] + sample_counter_metrics['expected_rate_tx']
+        mean_rate = df['value'].mean()
+        # Within 30% tolerance (rolling window and timing variations)
+        assert 0.7 * expected_combined <= mean_rate <= 1.3 * expected_combined
+
+    def test_rate_calculation_keeps_series_separate(self, test_db, sample_counter_metrics):
+        """Ensure rate calculation doesn't mix different counter series.
+
+        This tests the fix for the bug where different metrics (with vastly different
+        counter values like disk_read=18TB and disk_write=9TB) were grouped together,
+        causing the rolling window to see alternating high/low values and produce
+        massive negative rates.
+        """
+        import time
+        now = int(time.time())
+
+        # Get raw rates (before aggregation) to verify each series calculated separately
+        df = MetricQueryBuilder.get_rate_timeseries(
+            metric_name=["network_receive_bytes_total", "network_transmit_bytes_total"],
+            start_time=now - 300,
+            end_time=now,
+            client_ids=[sample_counter_metrics['client'].id],
+            aggregation="raw",  # No aggregation - keep series separate
+            rate_window_minutes=1,
+            active_only=False
+        )
+
+        assert not df.empty
+        # All rates should be non-negative (counters are monotonically increasing)
+        negative_rates = df[df['value'] < 0]
+        assert len(negative_rates) == 0, f"Found {len(negative_rates)} negative rates, should be 0"
+
+    def test_rate_with_large_counter_values(self, test_db, sample_client):
+        """Test rate calculation with large counter values (TB range) like disk I/O.
+
+        Ensures that large counter values don't cause overflow or mixing issues.
+        """
+        import time
+        now = int(time.time())
+
+        # Create metrics with large counter values (simulating disk I/O)
+        read_series = MetricSeries.get_or_create_series(
+            client_id=sample_client.id,
+            metric_name="disk_read_bytes_total",
+            labels='{"device": "nvme0n1"}',
+            value_type="float"
+        )
+
+        write_series = MetricSeries.get_or_create_series(
+            client_id=sample_client.id,
+            metric_name="disk_write_bytes_total",
+            labels='{"device": "nvme0n1"}',
+            value_type="float"
+        )
+
+        # Create data with large values (18TB read, 9TB write)
+        base_read = 18e12  # 18 TB
+        base_write = 9e12  # 9 TB
+        rate_read = 100e6  # 100 MB/s
+        rate_write = 50e6  # 50 MB/s
+
+        for i in range(10):
+            timestamp = now - ((9 - i) * 30)
+
+            MetricPointsFloat.create(
+                series=read_series,
+                timestamp=timestamp,
+                sent_at=timestamp,
+                value=base_read + (i * 30 * rate_read)
+            )
+
+            MetricPointsFloat.create(
+                series=write_series,
+                timestamp=timestamp,
+                sent_at=timestamp,
+                value=base_write + (i * 30 * rate_write)
+            )
+
+        # Calculate aggregated rate
+        df = MetricQueryBuilder.get_rate_timeseries(
+            metric_name=["disk_read_bytes_total", "disk_write_bytes_total"],
+            start_time=now - 300,
+            end_time=now,
+            client_ids=[sample_client.id],
+            aggregation="sum",
+            rate_window_minutes=1,
+            active_only=False
+        )
+
+        assert not df.empty
+        # Should have no negative rates
+        assert all(df['value'] >= 0), f"Found negative rates with large counters: {df[df['value'] < 0]['value'].tolist()}"
+
+        # Combined rate should be approximately read + write rate
+        expected_combined = rate_read + rate_write
+        mean_rate = df['value'].mean()
+        assert 0.7 * expected_combined <= mean_rate <= 1.3 * expected_combined

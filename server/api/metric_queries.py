@@ -9,6 +9,7 @@ No logic duplication, clean separation of concerns.
 import json
 import logging
 import pandas as pd
+import numpy as np
 from typing import List, Optional, Dict, Any, Union
 from peewee import reduce, Model, fn, Case
 import operator
@@ -235,16 +236,7 @@ class MetricQueryBuilder:
             ])
             
             
-            # Get int and float points
-            int_query = (MetricPointsInt.select()
-                        .where(
-                            (MetricPointsInt.series.in_(series_ids)) &
-                            (MetricPointsInt.timestamp >= start_time) &
-                            (MetricPointsInt.timestamp <= end_time)
-                        )
-                        .order_by(MetricPointsInt.timestamp)
-                        .dicts())
-            
+            # Get float points (all metrics stored as float per architecture decision)
             float_query = (MetricPointsFloat.select()
                           .where(
                               (MetricPointsFloat.series.in_(series_ids)) &
@@ -253,18 +245,10 @@ class MetricQueryBuilder:
                           )
                           .order_by(MetricPointsFloat.timestamp)
                           .dicts())
-            
-            int_df = pd.DataFrame(list(int_query)) if series_ids else pd.DataFrame()
-            float_df = pd.DataFrame(list(float_query)) if series_ids else pd.DataFrame()
-            
-            # Combine data
-            if not int_df.empty and not float_df.empty:
-                df = pd.concat([int_df, float_df], ignore_index=True)
-            elif not int_df.empty:
-                df = int_df
-            elif not float_df.empty:
-                df = float_df
-            else:
+
+            df = pd.DataFrame(list(float_query)) if series_ids else pd.DataFrame()
+
+            if df.empty:
                 return pd.DataFrame()
             
             # Merge with client info using 'series' column
@@ -503,29 +487,49 @@ class MetricQueryBuilder:
         df = df.sort_values(['client_id', 'datetime'])  # Sort once for all groups
         
         result_groups = []
-        
-        for (client_id, client_name), group in df.groupby(['client_id', 'client_name']):
+
+        # Group by series to calculate rates per metric/device separately
+        # This prevents mixing different metrics (e.g., disk_read + disk_write) in same rate calculation
+        for (series_id, client_id, client_name), group in df.groupby(['series', 'client_id', 'client_name']):
             if len(group) < 2:
                 continue  # Need at least 2 points for rate calculation
-                
+
             # Group is already sorted, just set index for time-based operations
             group = group.set_index('datetime')
-            
-            # Calculate rate using pandas diff operations
-            group['rate'] = group['value'].diff() / group.index.to_series().diff().dt.total_seconds()
-            
-            # Apply rolling window for smoothing (Grafana-style windowed rates)
-            group['rate_windowed'] = group['rate'].rolling(f"{rate_window_minutes}min").mean()
-            
+
+            # Grafana-style rate[Xm] calculation:
+            # For each point, look back X minutes and calculate rate from first to last value in that window
+            window = f"{rate_window_minutes}min"
+
+            def calculate_window_rate(window_data):
+                if len(window_data) < 2:
+                    return np.nan
+                # Rate = (last_value - first_value) / (last_time - first_time)
+                first_val = window_data.iloc[0]
+                last_val = window_data.iloc[-1]
+                time_diff = (window_data.index[-1] - window_data.index[0]).total_seconds()
+                if time_diff == 0:
+                    return np.nan
+
+                # Counter reset detection: if counter decreased, assume reset and return 0
+                # Counters should be monotonically increasing
+                if last_val < first_val:
+                    return 0.0
+
+                return (last_val - first_val) / time_diff
+
+            # Apply rolling window rate calculation
+            group['rate'] = group['value'].rolling(window).apply(calculate_window_rate, raw=False)
+
             # Reset index and prepare output
             group = group.reset_index()
-            valid = group[group['rate_windowed'].notna()].copy()
-            
+            valid = group[group['rate'].notna()].copy()
+
             if not valid.empty:
                 valid['client_id'] = client_id
                 valid['client_name'] = client_name
-                valid = valid[['timestamp', 'rate_windowed', 'client_id', 'client_name']]
-                valid = valid.rename(columns={'rate_windowed': 'value'})
+                valid = valid[['timestamp', 'rate', 'client_id', 'client_name']]
+                valid = valid.rename(columns={'rate': 'value'})
                 result_groups.append(valid)
         
         return pd.concat(result_groups, ignore_index=True) if result_groups else pd.DataFrame()
