@@ -13,11 +13,11 @@ import uvicorn
 try:
     from .core.config import load_config_from, resolve_paths
     from .core.server import create_app
-    from .certificates.certificate_manager import get_ssl_context
+    from .core.certs import get_ssl_context
 except ImportError:
     from core.config import load_config_from, resolve_paths
     from core.server import create_app
-    from certificates.certificate_manager import get_ssl_context
+    from core.certs import get_ssl_context
 
 
 def main():

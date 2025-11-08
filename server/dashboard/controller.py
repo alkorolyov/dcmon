@@ -14,11 +14,11 @@ from datetime import datetime, timedelta
 try:
     from ..models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
     from ..api.queries import MetricQueryBuilder, CPU_SENSORS, VRM_SENSORS
-    from ..web.template_helpers import format_bytes
+    from .filters import format_bytes
 except ImportError:
     from models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
     from api.queries import MetricQueryBuilder, CPU_SENSORS, VRM_SENSORS
-    from web.template_helpers import format_bytes
+    from dashboard.filters import format_bytes
 
 from .config import get_metric_status, format_metric_value, METRIC_THRESHOLDS
 from .device_rules import categorize_by_device, _is_network_device, _is_storage_device

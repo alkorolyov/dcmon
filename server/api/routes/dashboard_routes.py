@@ -15,13 +15,13 @@ try:
     from ...dashboard import DashboardController
     from ...dashboard.controller import TABLE_COLUMNS
     from ..dependencies import AuthDependencies
-    from ...web.template_helpers import setup_template_filters
+    from ...dashboard.filters import setup_template_filters
     from ...core.audit import audit_logger
 except ImportError:
     from dashboard import DashboardController
     from dashboard.controller import TABLE_COLUMNS
     from api.dependencies import AuthDependencies
-    from web.template_helpers import setup_template_filters
+    from dashboard.filters import setup_template_filters
     from core.audit import audit_logger
 
 logger = logging.getLogger("dcmon.server")
