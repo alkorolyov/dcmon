@@ -1,0 +1,102 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+.tox/
+.hypothesis/
+tests/~/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+dcmon.db
+
+# Logs
+*.log
+*.log.*
+audit.log*
+nohup.out
+log-cursors.json
+
+# Certificates and keys
+*.key
+*.pub
+*.crt
+*.pem
+*.csr
+server.key
+server.crt
+client.key
+client.pub
+
+# Tokens and secrets
+*_token
+*_id
+admin_token
+client_token
+client_id
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.orig
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Project-specific runtime files
+client/client.key
+client/client.pub
+client/client_id
+client/client_token
+client/log-cursors.json
+server/admin_token
+server/server.key
+server/server.crt
+server/dcmon.db*
+server/audit.log*
+server/server.log
+client/client.log
+
+# Keep structure but ignore generated content
+exporters_old.py
