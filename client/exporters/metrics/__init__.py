@@ -9,6 +9,7 @@ from .nvme import NvmeExporter
 from .nvsmi import NvsmiExporter
 from .bmc_fan import BMCFanExporter
 from .psu import IpmicfgPsuExporter
+from .manager import MetricsCollectorManager
 
 __all__ = [
     # Base classes
@@ -24,4 +25,7 @@ __all__ = [
     'NvsmiExporter',
     'BMCFanExporter',
     'IpmicfgPsuExporter',
+
+    # Manager
+    'MetricsCollectorManager',
 ]

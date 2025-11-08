@@ -5,6 +5,7 @@ from .vast import VastLogExporter
 from .syslog import SyslogExporter
 from .dmesg import DmesgExporter
 from .journal import JournalExporter
+from .manager import LogExporterManager
 
 __all__ = [
     # Base classes
@@ -16,4 +17,7 @@ __all__ = [
     'SyslogExporter',
     'DmesgExporter',
     'JournalExporter',
+
+    # Manager
+    'LogExporterManager',
 ]

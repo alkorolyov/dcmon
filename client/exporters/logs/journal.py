@@ -101,8 +101,8 @@ class JournalExporter(LogExporter):
             import subprocess
             import json
 
-            # Get last 1000 entries
-            cmd = ['journalctl', '--output=json', '--no-pager', '--lines=1000']
+            # Get configured number of historical entries
+            cmd = ['journalctl', '--output=json', '--no-pager', f'--lines={self.history_size}']
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode != 0:
@@ -122,10 +122,10 @@ class JournalExporter(LogExporter):
                     if not message:
                         continue
 
-                    # Crop to 1000 entries max
+                    # Crop to configured history size
                     entry_count += 1
-                    if entry_count > 1000:
-                        self.logger.info(f"journal history cropped to 1000 entries")
+                    if entry_count > self.history_size:
+                        self.logger.info(f"journal history cropped to {self.history_size} entries")
                         break
 
                     # Extract timestamp

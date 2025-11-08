@@ -87,10 +87,10 @@ class DmesgExporter(LogExporter):
 
             lines = result.stdout.strip().split('\n')
 
-            # Crop to last 1000 lines if exceeding
-            if len(lines) > 1000:
-                lines = lines[-1000:]
-                self.logger.info(f"dmesg history cropped to last 1000 lines")
+            # Crop to configured history size
+            if len(lines) > self.history_size:
+                lines = lines[-self.history_size:]
+                self.logger.info(f"dmesg history cropped to last {self.history_size} lines")
 
             entries = []
             for line in lines:

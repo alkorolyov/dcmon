@@ -31,6 +31,7 @@ class LogExporter:
         self.max_lines_per_cycle = log_config.get('max_lines_per_cycle', 50)
         self.severity_filter = log_config.get('severity_filter', 'WARN')
         self.enabled_sources = log_config.get('sources', ['dmesg', 'journal'])
+        self.history_size = log_config.get('history_size', 1000)
 
         # Each exporter has a source_name (defined in children)
         self.source_name = getattr(self, 'source_name', 'unknown')

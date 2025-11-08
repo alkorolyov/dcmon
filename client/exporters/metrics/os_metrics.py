@@ -9,10 +9,14 @@ from .base import MetricsExporter, MetricPoint
 class OSMetricsExporter(MetricsExporter):
     """Collects standard OS metrics: CPU, RAM, disk, network (bytes only)."""
 
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(self, logger: Optional[logging.Logger] = None, config: Optional[Dict] = None):
         super().__init__("os")
         self.logger = logger or logging.getLogger("os-metrics")
         self._last_cpu_stats = None  # [user, nice, system, idle]
+
+        # Get mountpoints from config or use defaults
+        self.config = config or {}
+        self.mountpoints = self.config.get("mountpoints", ["/", "/var/lib/docker"])
 
     async def collect(self) -> List[MetricPoint]:
         metrics: List[MetricPoint] = []
@@ -223,10 +227,8 @@ class OSMetricsExporter(MetricsExporter):
         """
         metrics: List[MetricPoint] = []
 
-        # Mountpoints to monitor
-        mountpoints = ["/", "/var/lib/docker"]
-
-        for mountpoint in mountpoints:
+        # Use configured mountpoints
+        for mountpoint in self.mountpoints:
             try:
                 # Check if mountpoint exists
                 if not os.path.exists(mountpoint):

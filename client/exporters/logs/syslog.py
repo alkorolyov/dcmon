@@ -76,20 +76,20 @@ class SyslogExporter(LogExporter):
             raise Exception(f"Failed to collect syslog incremental: {e}")
 
     def collect_history(self, cursors: Dict) -> List[LogEntry]:
-        """Collect last 1000 lines from syslog file (first run)."""
+        """Collect last N lines from syslog file (first run)."""
         try:
             syslog_file = Path('/var/log/syslog')
             if not syslog_file.exists():
                 raise Exception("/var/log/syslog does not exist")
 
-            # Read last 1000 lines from file
+            # Read all lines from file
             with open(syslog_file, 'r') as f:
                 lines = f.readlines()
 
-            # Crop to last 1000 lines
-            if len(lines) > 1000:
-                lines = lines[-1000:]
-                self.logger.info(f"syslog history cropped to last 1000 lines")
+            # Crop to configured history size
+            if len(lines) > self.history_size:
+                lines = lines[-self.history_size:]
+                self.logger.info(f"syslog history cropped to last {self.history_size} lines")
 
             entries = []
             for line in lines:

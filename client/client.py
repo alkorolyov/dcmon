@@ -27,91 +27,27 @@ import logging
 import os
 import socket
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-import yaml
+from client.config import ClientConfig
 
 # Local auth helper (keys + registration request)
 try:
     # when run as module
     from .auth import ClientAuth, setup_client_auth
-    from .exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter, LogExporterManager
-    from .websocket_commands import start_websocket_command_server
+    from .exporters import MetricsCollectorManager, LogExporterManager
+    from .commands import start_websocket_command_server
 except ImportError:
     # when run as script from project root
     from auth import ClientAuth, setup_client_auth
-    from exporters import OSMetricsExporter, IpmiExporter, AptExporter, NvmeExporter, NvsmiExporter, BMCFanExporter, IpmicfgPsuExporter, LogExporterManager
-    from websocket_commands import start_websocket_command_server
+    from exporters import MetricsCollectorManager, LogExporterManager
+    from commands import start_websocket_command_server
 
 
-LOG = logging.getLogger("dcmon.client")
-
-
-# ---------------- Configuration ----------------
-
-@dataclass
-class ClientConfig:
-    """Client configuration with defaults"""
-    auth_dir: str = "/etc/dcmon"
-    server: str = "https://127.0.0.1:8000"
-    interval: int = 30
-    log_level: str = "INFO"
-    once: bool = False
-    registration: bool = False
-    test_mode: bool = False
-    exporters: Dict[str, bool] = None
-    log_monitoring: Dict[str, Any] = None
-    
-    def __post_init__(self):
-        if self.exporters is None:
-            self.exporters = {
-                "os": True,
-                "ipmi": True, 
-                "apt": True,
-                "nvme": True,
-                "nvsmi": True,
-                "bmc_fan": True,
-                "ipmicfg_psu": True
-            }
-        if self.log_monitoring is None:
-            self.log_monitoring = {
-                "enabled": False,
-                "sources": ["dmesg", "journal"],
-                "severity_filter": "ERROR",
-                "max_lines_per_cycle": 25
-            }
-    
-    @classmethod
-    def from_file(cls, config_path: Path) -> "ClientConfig":
-        """Load configuration from YAML file"""
-        if not config_path.exists():
-            LOG.debug(f"Config file not found: {config_path}, using defaults")
-            return cls()
-        
-        try:
-            with open(config_path, "r") as f:
-                data = yaml.safe_load(f) or {}
-            LOG.debug(f"Loaded config from {config_path}: {data}")
-            return cls(**data)
-        except Exception as e:
-            LOG.warning(f"Failed to load config from {config_path}: {e}, using defaults")
-            return cls()
-    
-    def override_with_args(self, args: argparse.Namespace) -> "ClientConfig":
-        """Override config with command line arguments if provided"""
-        # Only override if explicitly provided - preserves config file values
-        self.auth_dir = args.auth_dir if args.auth_dir is not None else self.auth_dir
-        self.server = args.server if args.server is not None else self.server  
-        self.interval = args.interval if args.interval is not None else self.interval
-        self.log_level = args.log_level if args.log_level is not None else self.log_level
-        self.once = args.once
-        self.registration = args.registration
-        return self
-
+logger = logging.getLogger(__name__)
 
 # ---------------- HTTP helpers ----------------
 
@@ -292,7 +228,7 @@ def detect_all_drives() -> List[Dict[str, Any]]:
         
         return drives
     except Exception as e:
-        LOG.debug(f"detect_all_drives exception: {e}")
+        logger.debug(f"detect_all_drives exception: {e}")
         return []
 
 
@@ -383,59 +319,6 @@ def _now() -> int:
     return int(time.time())
 
 
-class MetricsCollector:
-    """Manages metrics collection from all exporters with singleton pattern"""
-    
-    def __init__(self, hw_info: Dict = None):
-        """Initialize all exporters once during startup"""
-        self.hw_info = hw_info or {}
-        LOG.info("Initializing metrics exporters...")
-        self.exporters = [
-            OSMetricsExporter(),
-            IpmiExporter(),
-            AptExporter(), 
-            NvmeExporter(),
-            NvsmiExporter(),
-            BMCFanExporter(hw_info=self.hw_info),
-            IpmicfgPsuExporter(),
-        ]
-        LOG.info(f"Initialized {len(self.exporters)} metrics exporters")
-    
-    async def collect_metrics(self) -> List[Dict[str, Any]]:
-        """
-        Collect metrics from all initialized exporters.
-        Returns metrics in server's expected schema format.
-        """
-        all_metrics = []
-        
-        # Collect from each pre-initialized exporter
-        for exporter in self.exporters:
-            try:
-                exporter_metrics = await exporter.collect()
-                # Convert MetricPoint objects to dict format expected by server
-                for metric in exporter_metrics:
-                    # Determine value type from MetricPoint's integer classification
-                    value_type = "int" if isinstance(metric.value, int) else "float"
-                    
-                    metric_dict = {
-                        "timestamp": metric.timestamp,
-                        "metric_name": metric.name,
-                        "labels": metric.labels,
-                        "value_type": value_type,
-                        "value": float(metric.value)  # Always send as float, server will convert if needed
-                    }
-                        
-                    all_metrics.append(metric_dict)
-                    
-            except Exception as e:
-                LOG.warning(f"Failed to collect metrics from {exporter.__class__.__name__}: {e}")
-                continue
-        
-        return all_metrics
-
-
-
-
 def send_metrics(server_base: str, client_token: str, metrics: List[Dict[str, Any]], hw_hash: Optional[str] = None, logs: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     if not metrics:
         return {"received": 0, "inserted": 0}
@@ -507,7 +390,7 @@ def register_client_interactively(auth: ClientAuth, server_base: str, hostname: 
             raise SystemExit("ERROR: Server did not return client_token in registration response.")
         
         print("✅ Client registered successfully!")
-        LOG.info("Client registered with server: %s", server_base)
+        logger.info("Client registered with server: %s", server_base)
         return client_token
         
     except HTTPError as e:
@@ -550,33 +433,32 @@ async def run_client(config: ClientConfig) -> None:
         # Save the client token for future use
         if not auth.save_client_token(token):
             raise SystemExit("ERROR: Failed to save client token after registration.")
-        LOG.info("Client token saved successfully")
+        logger.info("Client token saved successfully")
 
     # Generate hardware hash once for metrics sending
     hw_info = detect_hardware()
     hw_hash = hw_info.get("hw_hash")
-    
-    # Initialize metrics collector once (singleton exporters) with hardware info
-    metrics_collector = MetricsCollector(hw_info=hw_info)
-    
+
+    # Initialize metrics collector once (singleton exporters) with hardware info and config
+    metrics_collector = MetricsCollectorManager(hw_info=hw_info, config=config.__dict__)
+
     # Initialize log exporter manager with auth_dir and config
     log_exporter = LogExporterManager(Path(config.auth_dir), config.__dict__)
     
     # Get client ID for WebSocket server (we'll need to modify this once we have proper client registration)
     # For now, use a simple hash of the token as client_id
-    import hashlib
     client_id = abs(hash(token)) % 10000  # Simple client ID generation
     
     async def metrics_loop():
         """Main metrics collection loop."""
-        LOG.info("metrics loop starting; posting to %s every %ss", config.server, config.interval)
+        logger.info("metrics loop starting; posting to %s every %ss", config.server, config.interval)
         connection_failed = False
         
         while True:
             try:
                 batch = await metrics_collector.collect_metrics()
                 if not batch:
-                    LOG.warning("no metrics collected")
+                    logger.warning("no metrics collected")
                 
                 # Collect logs (non-async, synchronous collection)
                 log_entries = log_exporter.collect_new_logs()
@@ -593,11 +475,11 @@ async def run_client(config: ClientConfig) -> None:
                     ]
                 
                 res = send_metrics(config.server, token, batch, hw_hash, logs_data if logs_data else None)
-                LOG.debug("sent metrics: %s", res)
+                logger.debug("sent metrics: %s", res)
                 
                 # Log successful reconnection after failures
                 if connection_failed:
-                    LOG.info("successfully reconnected to server: %s", config.server)
+                    logger.info("successfully reconnected to server: %s", config.server)
                     connection_failed = False
                     
             except HTTPError as e:
@@ -606,20 +488,20 @@ async def run_client(config: ClientConfig) -> None:
                     msg = e.read().decode("utf-8")
                 except Exception:
                     msg = str(e)
-                LOG.error("HTTP %s error from server: %s", getattr(e, "code", "?"), msg)
+                logger.error("HTTP %s error from server: %s", getattr(e, "code", "?"), msg)
             except URLError as e:
                 connection_failed = True
-                LOG.error("failed to reach server: %s", e)
+                logger.error("failed to reach server: %s", e)
             except Exception as e:
                 connection_failed = True
-                LOG.exception("unexpected error during metrics send: %s", e)
+                logger.exception("unexpected error during metrics send: %s", e)
 
             if config.once:
                 break
             await asyncio.sleep(max(1, config.interval))
     
     # Start both metrics collection and WebSocket command server concurrently
-    LOG.info("starting dcmon client with metrics collection and WebSocket commands")
+    logger.info("starting dcmon client with metrics collection and WebSocket commands")
     
     if config.once:
         # For --once mode, only run metrics
@@ -655,7 +537,7 @@ def main():
     
     # Configure logging
     logging.basicConfig(level=getattr(logging, config.log_level))
-    LOG.info(f"dcmon client starting with config: server={config.server}, interval={config.interval}s")
+    logger.info(f"dcmon client starting with config: server={config.server}, interval={config.interval}s")
 
     try:
         asyncio.run(run_client(config))

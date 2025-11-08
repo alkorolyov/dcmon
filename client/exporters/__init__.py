@@ -38,6 +38,7 @@ from .metrics import (
     NvsmiExporter,
     BMCFanExporter,
     IpmicfgPsuExporter,
+    MetricsCollectorManager,
 )
 
 # Import all log exporters
@@ -48,6 +49,7 @@ from .logs import (
     SyslogExporter,
     DmesgExporter,
     JournalExporter,
+    LogExporterManager,
 )
 
 # Import utility functions
@@ -73,6 +75,9 @@ __all__ = [
     'BMCFanExporter',
     'IpmicfgPsuExporter',
 
+    # Metrics manager
+    'MetricsCollectorManager',
+
     # Log base classes
     'LogEntry',
     'LogExporter',
@@ -82,6 +87,9 @@ __all__ = [
     'SyslogExporter',
     'DmesgExporter',
     'JournalExporter',
+
+    # Log manager
+    'LogExporterManager',
 
     # Utility functions
     'is_supermicro_compatible',

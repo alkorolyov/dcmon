@@ -76,20 +76,20 @@ class VastLogExporter(LogExporter):
             raise Exception(f"Failed to collect vast incremental: {e}")
 
     def collect_history(self, cursors: Dict) -> List[LogEntry]:
-        """Collect last 1000 lines from vast log file (first run)."""
+        """Collect last N lines from vast log file (first run)."""
         try:
             vast_file = Path('/var/lib/vastai_kaalia/kaalia.log')
             if not vast_file.exists():
                 raise Exception("/var/lib/vastai_kaalia/kaalia.log does not exist")
 
-            # Read last 1000 lines from file
+            # Read all lines from file
             with open(vast_file, 'r') as f:
                 lines = f.readlines()
 
-            # Crop to last 1000 lines
-            if len(lines) > 1000:
-                lines = lines[-1000:]
-                self.logger.info(f"vast history cropped to last 1000 lines")
+            # Crop to configured history size
+            if len(lines) > self.history_size:
+                lines = lines[-self.history_size:]
+                self.logger.info(f"vast history cropped to last {self.history_size} lines")
 
             entries = []
             for line in lines:

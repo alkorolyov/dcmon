@@ -1,6 +1,8 @@
 server: "https://localhost:8000"
 auth_dir: "."
 interval: 30
+
+# Metrics exporters - enable/disable each type
 exporters:
   os: true
   ipmi: true
@@ -9,9 +11,17 @@ exporters:
   nvsmi: true
   bmc_fan: true
   ipmicfg_psu: true
+
+# OS metrics specific configuration
+os_metrics:
+  mountpoints: ["/", "/var/lib/docker"]
+
+# Log monitoring configuration
 log_monitoring:
   enabled: true
   sources: ["dmesg", "journal", "syslog", "vast"]
   severity_filter: "INFO"
   max_lines_per_cycle: 50
+  history_size: 1000  # Number of historical entries to collect on first run
+
 log_level: "INFO"
