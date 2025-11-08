@@ -19,401 +19,100 @@ Admin token is only used during initial registration and never stored on client.
 
 import argparse
 import asyncio
-import base64
-import getpass
-import hashlib
 import json
 import logging
-import os
 import socket
-import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 # Local imports (handle both module and script execution)
 try:
     # when run as module
     from .config import ClientConfig
-    from .auth import ClientAuth, setup_client_auth
+    from .auth import setup_client_auth
     from .exporters import MetricsCollectorManager, LogExporterManager
     from .commands import start_websocket_command_client
+    from .hardware import detect_hardware
+    from .http_client import DCMonHttpClient
+    from .registration import register_client_interactively
 except ImportError:
     # when run as script from project root
     from config import ClientConfig
-    from auth import ClientAuth, setup_client_auth
+    from auth import setup_client_auth
     from exporters import MetricsCollectorManager, LogExporterManager
     from commands import start_websocket_command_client
+    from hardware import detect_hardware
+    from http_client import DCMonHttpClient
+    from registration import register_client_interactively
 
 
 logger = logging.getLogger(__name__)
 
-# ---------------- HTTP helpers ----------------
-
-def _create_ssl_context():
-    """Create SSL context for HTTPS that auto-trusts server certificates"""
-    import ssl
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
-    return ssl_context
-
-
-def _post_json(url: str, data: Dict[str, Any], headers: Dict[str, str], timeout: int = 10) -> Dict[str, Any]:
-    body = json.dumps(data).encode("utf-8")
-    hdrs = {"Content-Type": "application/json"}
-    hdrs.update(headers or {})
-    req = Request(url, data=body, headers=hdrs, method="POST")
-    
-    # Use SSL context for HTTPS URLs
-    ssl_context = _create_ssl_context() if url.startswith("https://") else None
-    
-    with urlopen(req, timeout=timeout, context=ssl_context) as resp:
-        raw = resp.read().decode("utf-8")
-        return json.loads(raw) if raw else {}
-
-
-def _get_json(url: str, headers: Dict[str, str], timeout: int = 10) -> Dict[str, Any]:
-    """GET request helper with HTTPS auto-trust support"""
-    req = Request(url, headers=headers or {}, method="GET")
-    
-    # Use SSL context for HTTPS URLs
-    ssl_context = _create_ssl_context() if url.startswith("https://") else None
-    
-    with urlopen(req, timeout=timeout, context=ssl_context) as resp:
-        raw = resp.read().decode("utf-8")
-        return json.loads(raw) if raw else {}
-
-
-# ---------------- Registration UX ----------------
-
-def ensure_registration_request(auth: ClientAuth, auth_dir: Path, hostname: str) -> Path:
-    """
-    Create <auth_dir>/registration_request.json with the signed request and return its path.
-    """
-    req = auth.create_registration_request(hostname=hostname)
-    if not req:
-        raise SystemExit("ERROR: failed to create registration request (keys missing or crypto error).")
-    out_path = auth_dir / "registration_request.json"
-    out_path.write_text(json.dumps(req, indent=2))
-    try:
-        out_path.chmod(0o600)
-    except Exception:
-        pass
-    return out_path
-
-
-def print_registration_instructions(server_base: str, req_path: Path, auth_dir: Path):
-    server_base = server_base.rstrip("/")
-    print(
-        f"\n⚠️  No client token found in {auth_dir}.\n"
-        f"   A registration request has been written to:\n"
-        f"     {req_path}\n\n"
-        f"➜ Ask an administrator to register this client:\n"
-        f"   curl -X POST {server_base}/api/clients/register \\\n"
-        f"        -H \"Authorization: Bearer <ADMIN_TOKEN>\" \\\n"
-        f"        -H \"Content-Type: application/json\" \\\n"
-        f"        --data-binary @{req_path}\n\n"
-        f"   The server will return JSON with a client_token. Save it to:\n"
-        f"     {auth_dir}/client_token    (chmod 600)\n\n"
-        f"   Then re-run this client.\n"
-    )
-
-
-# ---------------- Hardware detection ----------------
-
-def detect_motherboard() -> Optional[str]:
-    """Detect motherboard name from DMI."""
-    try:
-        vendor_path = Path("/sys/class/dmi/id/board_vendor")
-        name_path = Path("/sys/class/dmi/id/board_name")
-        
-        vendor = vendor_path.read_text().strip() if vendor_path.exists() else ""
-        name = name_path.read_text().strip() if name_path.exists() else ""
-        
-        if vendor and name:
-            return f"{vendor} {name}"
-        elif name:
-            return name
-        elif vendor:
-            return vendor
-        return None
-    except Exception:
-        return None
-
-def detect_cpu() -> Tuple[Optional[str], Optional[int]]:
-    """Detect CPU name and core count from /proc/cpuinfo."""
-    try:
-        cpu_name = None
-        core_count = 0
-        
-        with open("/proc/cpuinfo", "r") as f:
-            for line in f:
-                if line.startswith("model name") and cpu_name is None:
-                    cpu_name = line.split(":", 1)[1].strip()
-                elif line.startswith("processor"):
-                    core_count += 1
-        
-        return cpu_name, core_count if core_count > 0 else None
-    except Exception:
-        return None, None
-
-def detect_memory() -> Optional[int]:
-    """Detect total RAM in GB from /proc/meminfo."""
-    try:
-        with open("/proc/meminfo", "r") as f:
-            for line in f:
-                if line.startswith("MemTotal:"):
-                    kb = int(line.split()[1])
-                    gb = round(kb / 1024 / 1024)
-                    return gb
-        return None
-    except Exception:
-        return None
-
-def detect_gpu() -> Tuple[Optional[str], Optional[int]]:
-    """Detect primary GPU name and count."""
-    try:
-        # Try nvidia-smi first
-        result = os.popen("nvidia-smi --query-gpu=name --format=csv,noheader,nounits 2>/dev/null").read().strip()
-        if result:
-            gpus = result.split('\n')
-            gpu_count = len(gpus)
-            primary_gpu = gpus[0].strip()
-            return primary_gpu, gpu_count
-        
-        # Fallback to lspci for other GPUs
-        result = os.popen("lspci | grep -i vga 2>/dev/null").read().strip()
-        if result:
-            lines = result.split('\n')
-            gpu_count = len(lines)
-            # Extract GPU name from first line
-            if ':' in lines[0]:
-                primary_gpu = lines[0].split(':', 1)[1].strip()
-                return primary_gpu, gpu_count
-        
-        return None, None
-    except Exception:
-        return None, None
-
-def detect_machine_id() -> str:
-    """Read machine ID from /etc/machine-id."""
-    return Path("/etc/machine-id").read_text().strip()
-
-def detect_all_drives() -> List[Dict[str, Any]]:
-    """Detect all drives in the system."""
-    drives = []
-    try:
-        # Get all physical drives
-        result = os.popen("lsblk -d -n -o NAME,SIZE,MODEL 2>/dev/null | grep -E '^(sd|nvme|hd)'").read().strip()
-        
-        if result:
-            for line in result.split('\n'):
-                if line.strip():
-                    parts = line.strip().split()
-                    if len(parts) >= 2:
-                        device = parts[0]
-                        size_str = parts[1]
-                        model = ' '.join(parts[2:]) if len(parts) > 2 else None
-                        
-                        # Parse size to GB (handle both comma and dot decimal separators)
-                        size_gb = get_size_from_str(size_str)
-
-                        drives.append({
-                            "device": device,
-                            "model": model,
-                            "size_gb": size_gb
-                        })
-        
-        return drives
-    except Exception as e:
-        logger.debug(f"detect_all_drives exception: {e}")
-        return []
-
-
-def get_size_from_str(size_str: str) -> Any:
-    size_gb = None
-    if size_str.endswith('G'):
-        size_value = size_str[:-1].replace(',', '.')
-        size_gb = int(float(size_value))
-    elif size_str.endswith('T'):
-        size_value = size_str[:-1].replace(',', '.')
-        size_gb = int(float(size_value) * 1024)
-    elif size_str.endswith('M'):
-        size_value = size_str[:-1].replace(',', '.')
-        size_gb = int(float(size_value) / 1024)
-    return size_gb
-
-
-def create_hardware_hash(hardware_data: Dict[str, Any]) -> str:
-    """Create consistent hash from hardware data for change detection."""
-    # Create a consistent representation for hashing
-    hash_data = {
-        "mdb_name": hardware_data.get("mdb_name", ""),
-        "cpu_name": hardware_data.get("cpu_name", ""),
-        "cpu_cores": hardware_data.get("cpu_cores", 0),
-        "ram_gb": hardware_data.get("ram_gb", 0),
-        "gpu_name": hardware_data.get("gpu_name", ""),
-        "gpu_count": hardware_data.get("gpu_count", 0),
-        # Sort drives by device name for consistent ordering
-        "drives": sorted(hardware_data.get("drives", []), key=lambda x: x.get("device", ""))
-    }
-    
-    # Convert to JSON string with sorted keys for consistency
-    hash_string = json.dumps(hash_data, sort_keys=True, separators=(',', ':'))
-    
-    # Create SHA256 hash
-    return hashlib.sha256(hash_string.encode()).hexdigest()
-
-
-def detect_vast_machine_id() -> Optional[str]:
-    """Detect Vast.ai machine ID from /var/lib/vastai_kaalia/machine_id."""
-    try:
-        vast_machine_id_path = Path("/var/lib/vastai_kaalia/machine_id")
-        if vast_machine_id_path.exists():
-            machine_id = vast_machine_id_path.read_text().strip()
-            return machine_id if machine_id else None
-        return None
-    except Exception:
-        return None
-
-
-def detect_vast_port_range() -> Optional[str]:
-    """Detect Vast.ai port range from /var/lib/vastai_kaalia/host_port_range."""
-    try:
-        vast_port_range_path = Path("/var/lib/vastai_kaalia/host_port_range")
-        if vast_port_range_path.exists():
-            port_range = vast_port_range_path.read_text().strip()
-            return port_range if port_range else None
-        return None
-    except Exception:
-        return None
-
-
-def detect_hardware() -> Dict[str, Any]:
-    """Detect all hardware information."""
-    machine_id = detect_machine_id()
-    cpu_name, cpu_cores = detect_cpu()
-    gpu_name, gpu_count = detect_gpu()
-    
-    hardware = {
-        "machine_id": machine_id,  # Required for registration
-        "mdb_name": detect_motherboard(),
-        "cpu_name": cpu_name,
-        "cpu_cores": cpu_cores,
-        "gpu_name": gpu_name,
-        "gpu_count": gpu_count,
-        "ram_gb": detect_memory(),
-        "drives": detect_all_drives(),  # New: all drives data
-    }
-    
-    # Add hardware hash (exclude machine_id from hash since it's system ID, not hardware)
-    hardware["hw_hash"] = create_hardware_hash(hardware)
-    
-    return hardware
-
-# ---------------- Metrics collection (stdlib only) ----------------
-
-def _now() -> int:
-    return int(time.time())
-
-
-def send_metrics(server_base: str, client_token: str, metrics: List[Dict[str, Any]], hw_hash: Optional[str] = None, logs: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-    if not metrics:
-        return {"received": 0, "inserted": 0}
-    url = server_base.rstrip("/") + "/api/metrics"
-    headers = {"Authorization": f"Bearer {client_token}"}
-    data = {"metrics": metrics}
-    if hw_hash:
-        data["hw_hash"] = hw_hash
-    if logs:
-        data["logs"] = logs
-    return _post_json(url, data, headers)
-
-
-def register_client_interactively(auth: ClientAuth, server_base: str, hostname: str, test_mode: bool = False) -> Tuple[str, int]:
-    """
-    Register client with server using admin authentication.
-    In test mode, automatically uses dev token. In production, prompts for admin token.
-    Returns (client_token, client_id) on success, raises SystemExit on failure.
-    """
-    if test_mode:
-        print(f"\n🔧 Test mode detected - using dev admin token for registration of {hostname}")
-        admin_token = "dev_admin_token_12345"
-    else:
-        print(f"\n🔐 Client registration required for {hostname}")
-        print("Please enter the admin token to register this client with the server.")
-        
-        try:
-            admin_token = getpass.getpass("Admin token: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            # Fallback for non-interactive environments (testing/IDE)
-            print("\nFallback to regular input (dev mode):")
-            admin_token = input("Admin token: ").strip()
-        
-        if not admin_token:
-            raise SystemExit("ERROR: Admin token cannot be empty.")
-    
-    # Create registration request
-    req = auth.create_registration_request(hostname=hostname)
-    if not req:
-        raise SystemExit("ERROR: Failed to create registration request (keys missing or crypto error).")
-    
-    # Detect hardware information
-    print("🔍 Detecting hardware specifications...")
-    hardware = detect_hardware()
-    
-    # Add hardware info to registration request
-    req.update(hardware)
-    
-    # Detect Vast.ai information if available
-    vast_machine_id = detect_vast_machine_id()
-    vast_port_range = detect_vast_port_range()
-    if vast_machine_id:
-        req["vast_machine_id"] = vast_machine_id
-    if vast_port_range:
-        req["vast_port_range"] = vast_port_range
-    
-    # Add admin token to request (only in memory)  
-    req["admin_token"] = admin_token
-    
-    # Send registration request using Basic Auth
-    url = server_base.rstrip("/") + "/api/clients/register"
-    credentials = base64.b64encode(f"admin:{admin_token}".encode()).decode()
-    headers = {"Authorization": f"Basic {credentials}"}
-    
-    try:
-        response = _post_json(url, req, headers)
-        client_token = response.get("client_token")
-        client_id = response.get("client_id")
-
-        if not client_token:
-            raise SystemExit("ERROR: Server did not return client_token in registration response.")
-        if not client_id:
-            raise SystemExit("ERROR: Server did not return client_id in registration response.")
-
-        print("✅ Client registered successfully!")
-        logger.info("Client registered with server: %s (client_id=%s)", server_base, client_id)
-        return client_token, client_id
-        
-    except HTTPError as e:
-        try:
-            error_msg = e.read().decode("utf-8")
-        except Exception:
-            error_msg = str(e)
-        raise SystemExit(f"ERROR: Registration failed (HTTP {getattr(e, 'code', '?')}): {error_msg}")
-    
-    except URLError as e:
-        raise SystemExit(f"ERROR: Failed to reach server: {e}")
-    
-    except Exception as e:
-        raise SystemExit(f"ERROR: Registration failed: {e}")
-
 
 # ---------------- Main ----------------
 
+async def metrics_loop(
+    config: ClientConfig,
+    token: str,
+    hw_hash: Optional[str],
+    metrics_collector: MetricsCollectorManager,
+    log_exporter: LogExporterManager
+) -> None:
+    """Main metrics collection loop."""
+    logger.info("metrics loop starting; posting to %s every %ss", config.server, config.interval)
+    connection_failed = False
+    http_client = DCMonHttpClient(config.server)
+
+    while True:
+        try:
+            batch = await metrics_collector.collect_metrics()
+            if not batch:
+                logger.warning("no metrics collected")
+
+            # Collect logs (non-async, synchronous collection)
+            log_entries = log_exporter.collect_new_logs()
+            logs_data = []
+            if log_entries:
+                logs_data = [
+                    {
+                        "log_source": entry.log_source,
+                        "log_timestamp": entry.log_timestamp,
+                        "content": entry.content,
+                        "severity": entry.severity
+                    }
+                    for entry in log_entries
+                ]
+
+            res = http_client.send_metrics(token, batch, hw_hash, logs_data if logs_data else None)
+            logger.debug("sent metrics: %s", res)
+
+            # Log successful reconnection after failures
+            if connection_failed:
+                logger.info("successfully reconnected to server: %s", config.server)
+                connection_failed = False
+
+        except HTTPError as e:
+            connection_failed = True
+            try:
+                msg = e.read().decode("utf-8")
+            except Exception:
+                msg = str(e)
+            logger.error("HTTP %s error from server: %s", getattr(e, "code", "?"), msg)
+        except URLError as e:
+            connection_failed = True
+            logger.error("failed to reach server: %s", e)
+        except Exception as e:
+            connection_failed = True
+            logger.exception("unexpected error during metrics send: %s", e)
+
+        if config.once:
+            break
+        await asyncio.sleep(max(1, config.interval))
+
+
 async def run_client(config: ClientConfig) -> None:
+    """Main client orchestration."""
     # Configure auth helper (keys + token)
     auth_dir = Path(config.auth_dir)
     auth = setup_client_auth(auth_dir)
@@ -453,67 +152,16 @@ async def run_client(config: ClientConfig) -> None:
     # Initialize log exporter manager with auth_dir and config
     log_exporter = LogExporterManager(Path(config.auth_dir), config.__dict__)
 
-    async def metrics_loop():
-        """Main metrics collection loop."""
-        logger.info("metrics loop starting; posting to %s every %ss", config.server, config.interval)
-        connection_failed = False
-        
-        while True:
-            try:
-                batch = await metrics_collector.collect_metrics()
-                if not batch:
-                    logger.warning("no metrics collected")
-                
-                # Collect logs (non-async, synchronous collection)
-                log_entries = log_exporter.collect_new_logs()
-                logs_data = []
-                if log_entries:
-                    logs_data = [
-                        {
-                            "log_source": entry.log_source,
-                            "log_timestamp": entry.log_timestamp,
-                            "content": entry.content,
-                            "severity": entry.severity
-                        }
-                        for entry in log_entries
-                    ]
-                
-                res = send_metrics(config.server, token, batch, hw_hash, logs_data if logs_data else None)
-                logger.debug("sent metrics: %s", res)
-                
-                # Log successful reconnection after failures
-                if connection_failed:
-                    logger.info("successfully reconnected to server: %s", config.server)
-                    connection_failed = False
-                    
-            except HTTPError as e:
-                connection_failed = True
-                try:
-                    msg = e.read().decode("utf-8")
-                except Exception:
-                    msg = str(e)
-                logger.error("HTTP %s error from server: %s", getattr(e, "code", "?"), msg)
-            except URLError as e:
-                connection_failed = True
-                logger.error("failed to reach server: %s", e)
-            except Exception as e:
-                connection_failed = True
-                logger.exception("unexpected error during metrics send: %s", e)
-
-            if config.once:
-                break
-            await asyncio.sleep(max(1, config.interval))
-    
     # Start both metrics collection and WebSocket command server concurrently
     logger.info("starting dcmon client with metrics collection and WebSocket commands")
-    
+
     if config.once:
         # For --once mode, only run metrics
-        await metrics_loop()
+        await metrics_loop(config, token, hw_hash, metrics_collector, log_exporter)
     else:
         # Run both metrics and WebSocket command client concurrently
         await asyncio.gather(
-            metrics_loop(),
+            metrics_loop(config, token, hw_hash, metrics_collector, log_exporter),
             start_websocket_command_client(config, client_id, token)
         )
 
