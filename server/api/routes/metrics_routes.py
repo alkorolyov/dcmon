@@ -14,12 +14,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 # Support running as script or as package
 try:
-    from ...models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
+    from ...models import Client, MetricSeries, MetricPoints, LogEntry
     from ..schemas import MetricsBatchRequest
     from ..dependencies import AuthDependencies
     from ..queries import MetricQueryBuilder
 except ImportError:
-    from models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
+    from models import Client, MetricSeries, MetricPoints, LogEntry
     from api.schemas import MetricsBatchRequest
     from api.dependencies import AuthDependencies
     from api.queries import MetricQueryBuilder
@@ -35,33 +35,34 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
     def submit_metrics(body: MetricsBatchRequest, client: Client = Depends(auth_deps.require_client_auth)):
         """Submit metrics batch from client."""
         now = int(time.time())
-        float_points = []  # All metrics stored as float per architecture decision
-        
+        metric_points = []  # All metrics stored as float per architecture decision
+
         for m in body.metrics:
             if m.timestamp > now + 300:
                 raise HTTPException(status_code=422, detail=f"metric timestamp too far in future: {m.timestamp}")
-            
+
             # Get or create metric series
             labels_json = json.dumps(m.labels) if m.labels else None
             series = MetricSeries.get_or_create_series(
                 client_id=client.id,
-                metric_name=m.metric_name, 
+                metric_name=m.metric_name,
                 labels=labels_json,
                 value_type=m.value_type
             )
-            
+
             # Store all metrics as float (architecture decision)
-            float_points.append({
+            metric_points.append({
                 "series": series.id,
                 "timestamp": m.timestamp,
+                "sent_at": now,
                 "value": float(m.value)
             })
 
         # Bulk insert points (all as float)
         inserted_total = 0
-        if float_points:
-            inserted_float = MetricPointsFloat.insert_many(float_points).on_conflict_ignore().execute()
-            inserted_total += int(inserted_float or 0)
+        if metric_points:
+            inserted = MetricPoints.insert_many(metric_points).on_conflict_ignore().execute()
+            inserted_total += int(inserted or 0)
 
         # Process log entries
         inserted_logs = 0
@@ -119,32 +120,27 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
         
         series_ids = [s.id for s in series_list]
         out = []
-        
-        # Query float points
-        float_query = MetricPointsFloat.select().where(MetricPointsFloat.series.in_(series_ids))
+
+        # Query metric points (all metrics stored as float)
+        points_query = MetricPoints.select().where(MetricPoints.series.in_(series_ids))
         if start:
-            float_query = float_query.where(MetricPointsFloat.timestamp >= start)
+            points_query = points_query.where(MetricPoints.timestamp >= start)
         if end:
-            float_query = float_query.where(MetricPointsFloat.timestamp <= end)
-        float_query = float_query.order_by(MetricPointsFloat.timestamp.desc()).limit(limit // 2)
-        
-        for point in float_query:
+            points_query = points_query.where(MetricPoints.timestamp <= end)
+        points_query = points_query.order_by(MetricPoints.timestamp.desc()).limit(limit)
+
+        for point in points_query:
             series = next(s for s in series_list if s.id == point.series.id)
             out.append({
                 "client_id": series.client.id,
                 "timestamp": point.timestamp,
                 "metric_name": series.metric_name,
                 "value_float": point.value,
-                "value_int": None,
+                "value_int": None,  # Legacy compatibility
                 "labels": json.loads(series.labels) if series.labels else None,
             })
-        
-        # Query float points (all metrics stored as float per architecture decision)
-        # Note: int_query removed as all data is now stored as float
-        
-        # Sort by timestamp descending
-        out.sort(key=lambda x: x["timestamp"], reverse=True)
-        return {"metrics": out[:limit]}
+
+        return {"metrics": out}
 
     @router.get("/api/timeseries/{metric_name}/rate")
     def get_rate_timeseries(

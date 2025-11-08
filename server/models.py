@@ -166,8 +166,33 @@ class MetricSeries(BaseModel):
             )
 
 
+class MetricPoints(BaseModel):
+    """Unified metric points table - all metrics stored as float."""
+    series = ForeignKeyField(MetricSeries, backref="points", on_delete="CASCADE", index=True, db_column="series_id")
+    timestamp = IntegerField()
+    sent_at = IntegerField()  # When metric was sent/collected
+    value = FloatField()  # All values stored as float
+
+    class Meta:
+        table_name = "metric_points"
+        primary_key = False
+        indexes = (
+            (("series", "timestamp"), True),  # UNIQUE constraint
+            (("timestamp",), False),  # For time-range queries
+            (("sent_at",), False),  # For collection time queries
+        )
+
+    @classmethod
+    def cleanup_old_data(cls, days_to_keep: int = 7) -> int:
+        """Remove old metric points beyond retention period."""
+        cutoff = int(time.time()) - days_to_keep * 24 * 3600
+        deleted = cls.delete().where(cls.timestamp < cutoff).execute()
+        logger.info(f"metrics cleanup: removed {deleted} rows (< {days_to_keep}d)")
+        return deleted
+
+
 class MetricPointsInt(BaseModel):
-    """Integer metric points (about 70% of data)."""
+    """Integer metric points (DEPRECATED - use MetricPoints)."""
     series = ForeignKeyField(MetricSeries, backref="int_points", on_delete="CASCADE", index=True)
     timestamp = IntegerField()
     value = IntegerField()
@@ -191,7 +216,7 @@ class MetricPointsInt(BaseModel):
 
 
 class MetricPointsFloat(BaseModel):
-    """Float metric points (about 30% of data)."""
+    """Float metric points (DEPRECATED - use MetricPoints)."""
     series = ForeignKeyField(MetricSeries, backref="float_points", on_delete="CASCADE", index=True)
     timestamp = IntegerField()
     value = FloatField()
