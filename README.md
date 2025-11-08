@@ -167,32 +167,69 @@ systemctl start dcmon-client
 pytest tests/unit/
 ```
 
-Current test coverage: 26 passing tests covering:
-- Label filtering
-- Latest metric value retrieval
-- Raw time-series queries
-- Time-series aggregation
-- Rate calculation (with large counter values)
+Current test coverage: **135 passing tests** covering:
+- Authentication (token generation, signature verification, admin/client auth)
+- Dashboard controller (metrics aggregation, client status, detail views)
+- Device categorization (GPU, PSU, network, storage devices)
+- Metric query builder (label filtering, latest values, time-series, rates)
+- Metrics ingestion (series creation, point storage, batch submission)
+- Rate calculations (Grafana-style rate[5m], counter resets, large values)
 
 ### Project Structure
 
 ```
 dcmon/
 ├── server/
-│   ├── api/                    # API routes and schemas
+│   ├── api/
+│   │   ├── queries/            # Metric query modules (modular architecture)
+│   │   │   ├── latest.py       # Latest value queries
+│   │   │   ├── timeseries.py   # Time-series data retrieval
+│   │   │   ├── rates.py        # Rate calculations
+│   │   │   ├── labels.py       # Label formatting & GPU mapping
+│   │   │   ├── utils.py        # Shared utilities
+│   │   │   └── constants.py    # Sensor mappings
+│   │   ├── routes/             # API endpoint definitions
+│   │   │   ├── auth_routes.py
+│   │   │   ├── metrics_routes.py
+│   │   │   ├── dashboard_routes.py
+│   │   │   ├── command_routes.py
+│   │   │   └── admin_routes.py
+│   │   ├── dependencies.py     # FastAPI dependencies
+│   │   └── schemas.py          # Pydantic models
 │   ├── core/                   # Core application logic
-│   ├── dashboard/              # Dashboard controller
-│   ├── certificates/           # Client certificates
-│   ├── migrations/             # Database migrations
-│   ├── ui/                     # Frontend templates and assets
-│   └── models.py               # Database models
+│   │   ├── config.py           # Configuration management
+│   │   ├── server.py           # FastAPI app factory
+│   │   └── audit.py            # Audit logging
+│   ├── dashboard/              # Dashboard logic
+│   │   ├── controller.py       # Data preparation
+│   │   ├── config.py           # Column configuration
+│   │   └── device_rules.py     # Device categorization (table-driven)
+│   ├── certificates/           # SSL/TLS certificate management
+│   ├── ui/                     # Frontend (vanilla JS, no framework)
+│   │   ├── components/         # Reusable UI components
+│   │   ├── pages/              # Page templates
+│   │   ├── scripts/            # JavaScript utilities
+│   │   └── styles/             # CSS stylesheets
+│   ├── web/                    # Template helpers (Jinja2 filters)
+│   ├── auth.py                 # Authentication service
+│   └── models.py               # Database models (Peewee ORM)
 ├── client/
-│   ├── exporters/              # Metric exporters
-│   │   └── metrics/           # Individual metric collectors
-│   ├── client.py              # Main client application
-│   └── config.yaml            # Client configuration
+│   ├── exporters/
+│   │   ├── metrics/            # Individual metric collectors
+│   │   │   ├── os_metrics.py
+│   │   │   ├── ipmi.py
+│   │   │   ├── nvsmi.py        # NVIDIA GPU
+│   │   │   ├── nvme.py
+│   │   │   ├── psu.py
+│   │   │   └── ...
+│   │   └── logs/               # Log collection exporters
+│   ├── main.py                 # Client entry point
+│   ├── auth.py                 # RSA authentication
+│   ├── http_client.py          # HTTP utilities (stdlib only)
+│   ├── commands.py             # WebSocket command handler
+│   └── config.yaml             # Client configuration
 └── tests/
-    └── unit/                   # Unit tests
+    └── unit/                   # Unit tests (135 tests)
 ```
 
 ## Rate Calculation
@@ -209,24 +246,42 @@ Example: Network I/O rate combines receive + transmit rates
 rate[5m](network_receive_bytes_total + network_transmit_bytes_total)
 ```
 
-## Recent Updates
+## Architecture Highlights
 
-### Major Refactor (November 2025)
-- Migrated to float-only metric storage
-- Fixed rate calculation for multi-metric aggregation
-- Added number formatting with K/M/G/T abbreviations
-- Improved chart visibility for flat lines
-- Added comprehensive test coverage
-- Fixed client log display issues
+### AI-Friendly Codebase
+This project is optimized for AI-assisted development and maintainability:
+
+**Modular Query System** (`server/api/queries/`)
+- Split into focused modules (latest, timeseries, rates, labels)
+- Each module under 200 lines for better comprehension
+- Clear separation of concerns (one responsibility per module)
+- Backwards compatible via `MetricQueryBuilder` wrapper
+
+**Table-Driven Logic** (`server/dashboard/device_rules.py`)
+- Device categorization via declarative lookup tables
+- Easy to extend (add row vs. modify complex if/elif chains)
+- GPU, PSU, network, storage device support
+
+**Minimal Dependencies**
+- Client: Only 3 packages (cryptography, PyYAML, websockets)
+- Uses Python stdlib (`urllib`) instead of heavy HTTP libraries
+- Frontend: Vanilla JavaScript (no React/Vue/build pipeline)
+
+**Comprehensive Testing**
+- 135 unit tests with >80% coverage
+- Test fixtures for all major components
+- Clean test organization by feature
 
 ## Contributing
 
 This project follows a refactored, AI-friendly architecture with:
-- Clear separation of concerns
-- Centralized query logic
-- Comprehensive error handling
-- Detailed commit messages
-- Test coverage for critical paths
+- **Clear separation of concerns** - Each module has single responsibility
+- **Modular query system** - Latest, timeseries, rates, labels separated
+- **Table-driven logic** - Declarative rules instead of complex conditionals
+- **Comprehensive error handling** - Fail-fast with clear error messages
+- **Detailed commit messages** - Full context for each change
+- **Test coverage** - 135 tests covering critical paths
+- **2-layer architecture** - Keep it simple (no over-abstraction)
 
 ## License
 
