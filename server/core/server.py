@@ -90,11 +90,12 @@ def create_app(config: ServerConfig) -> FastAPI:
     
     # 3. RUNTIME LIFESPAN (mutable resources only)
     cleanup_task: Optional[asyncio.Task] = None
+    vastai_task: Optional[asyncio.Task] = None
     CLEANUP_INTERVAL_SECONDS = 3600  # hourly
     
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal cleanup_task
+        nonlocal cleanup_task, vastai_task
         
         # STARTUP: Runtime resource setup
         setup_logging(config)
@@ -121,6 +122,16 @@ def create_app(config: ServerConfig) -> FastAPI:
                 await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
         
         cleanup_task = asyncio.create_task(cleanup_loop())
+
+        # Start VastAI metrics collector task
+        try:
+            from ..tasks.vastai_collector import vastai_collector_loop
+        except ImportError:
+            from tasks.vastai_collector import vastai_collector_loop
+
+        vastai_task = asyncio.create_task(vastai_collector_loop())
+        logger.info("VastAI metrics collector started")
+
         logger.info("dcmon server started (host=%s, port=%d)", config.host, config.port)
         
         try:
@@ -131,6 +142,12 @@ def create_app(config: ServerConfig) -> FastAPI:
                 cleanup_task.cancel()
                 try:
                     await cleanup_task
+                except asyncio.CancelledError:
+                    pass
+            if vastai_task:
+                vastai_task.cancel()
+                try:
+                    await vastai_task
                 except asyncio.CancelledError:
                     pass
             db_manager.close()

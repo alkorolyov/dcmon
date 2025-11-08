@@ -100,3 +100,6 @@ client/client.log
 
 # Keep structure but ignore generated content
 exporters_old.py
+
+# Environment variables
+.env
