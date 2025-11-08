@@ -248,7 +248,7 @@ with open('$config_file', 'w') as f: yaml.dump(config, f, default_flow_style=Fal
     print_step "Registering client with server..."
     echo
     
-    if python3 /opt/dcmon/client.py register "$admin_token" "$server_url"; then
+    if python3 /opt/dcmon/main.py register "$admin_token" "$server_url"; then
         print_success "Client registered successfully with server!"
         return 0
     else
@@ -392,8 +392,8 @@ retry_registration() {
     
     print_step "Attempting client registration..."
     
-    # Attempt registration using the new client.py
-    if echo "$admin_token" | python3 /opt/dcmon/client.py --auth-dir /etc/dcmon --server "$server_url" --once; then
+    # Attempt registration using the new main.py
+    if echo "$admin_token" | python3 /opt/dcmon/main.py --auth-dir /etc/dcmon --server "$server_url" --once; then
         print_success "✅ Registration successful!"
         
         # Set proper permissions

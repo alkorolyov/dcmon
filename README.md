@@ -134,7 +134,7 @@ Default admin credentials:
 
 ```bash
 # Development
-python3 client/client.py
+python3 client/main.py
 
 # Production (systemd)
 systemctl start dcmon-client
