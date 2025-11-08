@@ -95,14 +95,31 @@ class WebSocketCommandHandler:
     
     async def _get_system_info(self, command_data: Dict[str, Any]) -> Dict[str, Any]:
         """Get system information."""
-        info_type = command_data.get("info_type", "basic")
-        
+        # Server sends "type" parameter, not "info_type"
+        info_type = command_data.get("type", "basic")
+
         try:
             if info_type == "basic":
                 # Get basic system info
                 import platform
-                import psutil
-                
+
+                try:
+                    import psutil
+                except ImportError:
+                    return {
+                        "success": False,
+                        "message": "psutil library not installed (pip install psutil)"
+                    }
+
+                # Get disk usage and convert named tuple to dict
+                disk_usage = psutil.disk_usage('/')
+                disk_info = {
+                    "total": disk_usage.total,
+                    "used": disk_usage.used,
+                    "free": disk_usage.free,
+                    "percent": disk_usage.percent
+                }
+
                 return {
                     "success": True,
                     "result": {
@@ -110,7 +127,7 @@ class WebSocketCommandHandler:
                         "platform": platform.platform(),
                         "cpu_count": psutil.cpu_count(),
                         "memory_total": psutil.virtual_memory().total,
-                        "disk_usage": dict(psutil.disk_usage('/'))
+                        "disk_usage": disk_info
                     }
                 }
             else:
@@ -118,7 +135,7 @@ class WebSocketCommandHandler:
                     "success": False,
                     "message": f"Unknown info_type: {info_type}"
                 }
-                
+
         except Exception as e:
             return {
                 "success": False,
