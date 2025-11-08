@@ -9,7 +9,7 @@ from peewee import SqliteDatabase
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
-from models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
+from models import Client, MetricSeries, MetricPoints, LogEntry
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ def test_db():
     test_database = SqliteDatabase(':memory:')
 
     # Bind all models to test database
-    models = [Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry]
+    models = [Client, MetricSeries, MetricPoints, LogEntry]
     test_database.bind(models, bind_refs=False, bind_backrefs=False)
     test_database.connect()
     test_database.create_tables(models)
@@ -105,23 +105,23 @@ def sample_metrics(test_db, sample_client):
         sent_at = timestamp
 
         # CPU usage varies between 40-60%
-        MetricPointsFloat.create(
+        MetricPoints.create(
             series=cpu_series,
             timestamp=timestamp,
             sent_at=sent_at,
             value=45.0 + (i * 1.5)
         )
 
-        # CPU temp varies between 60-70°C (use float table)
-        MetricPointsFloat.create(
+        # CPU temp varies between 60-70°C
+        MetricPoints.create(
             series=temp_series,
             timestamp=timestamp,
             sent_at=sent_at,
             value=float(62 + i)
         )
 
-        # VRM temp varies between 50-58°C (use float table)
-        MetricPointsFloat.create(
+        # VRM temp varies between 50-58°C
+        MetricPoints.create(
             series=vrm_series,
             timestamp=timestamp,
             sent_at=sent_at,
@@ -169,15 +169,15 @@ def sample_counter_metrics(test_db, sample_client):
     for i in range(10):
         timestamp = now - ((9 - i) * 30)  # Every 30 seconds
 
-        # Use float table (architecture decision: all metrics stored as float)
-        MetricPointsFloat.create(
+        # All metrics stored as float in unified table
+        MetricPoints.create(
             series=rx_series,
             timestamp=timestamp,
             sent_at=timestamp,
             value=float(base_rx + (i * 30 * rate_rx))  # Monotonically increasing
         )
 
-        MetricPointsFloat.create(
+        MetricPoints.create(
             series=tx_series,
             timestamp=timestamp,
             sent_at=timestamp,
@@ -216,14 +216,14 @@ def sample_disk_metrics(test_db, sample_client):
     total_bytes = 100 * 1024**3  # 100 GB
     used_bytes = 75 * 1024**3    # 75 GB
 
-    MetricPointsFloat.create(
+    MetricPoints.create(
         series=used_series,
         timestamp=now,
         sent_at=now,
         value=float(used_bytes)
     )
 
-    MetricPointsFloat.create(
+    MetricPoints.create(
         series=total_series,
         timestamp=now,
         sent_at=now,
