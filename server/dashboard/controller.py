@@ -400,17 +400,13 @@ class DashboardController:
 
             if previous_data.empty:
                 return None
-            
-            # Find the closest previous value
-            previous_value = None
-            previous_timestamp = None
-            
-            for timestamp, values in previous_data:
-                if values and len(values) > 0:
-                    previous_value = values[0]  # Take first series value
-                    previous_timestamp = timestamp
-                    break
-            
+
+            # Get the first (oldest) data point from the time window
+            # DataFrame has columns: timestamp, value, client_id, client_name
+            first_row = previous_data.iloc[0]
+            previous_value = first_row['value']
+            previous_timestamp = first_row['timestamp']
+
             if previous_value is None or previous_timestamp is None:
                 return None
             

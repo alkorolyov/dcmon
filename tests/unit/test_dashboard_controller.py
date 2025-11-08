@@ -104,15 +104,87 @@ class TestCalculateFraction:
 class TestCalculateRate:
     """Test rate calculation for counter metrics"""
 
-    @pytest.mark.skip(reason="Rate calculation requires integration testing with real DataFrame iteration")
-    def test_calculate_rate_basic(self):
-        """Calculate rate from counter metric - needs integration test"""
-        pass
+    def test_calculate_rate_basic(self, test_db, sample_client):
+        """Calculate rate from counter metric using real database"""
+        import time
+        import pandas as pd
+        controller = DashboardController()
 
-    @pytest.mark.skip(reason="Rate calculation requires integration testing with real DataFrame iteration")
-    def test_calculate_rate_with_counter_reset_handles_gracefully(self):
-        """Counter reset handling - needs integration test"""
-        pass
+        now = int(time.time())
+
+        # Create a counter metric series
+        from models import MetricSeries, MetricPointsFloat
+        series = MetricSeries.get_or_create_series(
+            client_id=sample_client.id,
+            metric_name="network_receive_bytes_total",
+            labels='{"interface": "eth0"}',
+            value_type="float"
+        )
+
+        # Create data points: 5 minutes ago and now
+        # Rate should be (100000 - 0) / 300 = 333.33 bytes/sec
+        MetricPointsFloat.create(
+            series=series,
+            timestamp=now - 300,
+            value=0.0
+        )
+        MetricPointsFloat.create(
+            series=series,
+            timestamp=now,
+            value=100000.0
+        )
+
+        column_config = {
+            "metric_name": "network_receive_bytes_total",
+            "label_filters": [{"interface": "eth0"}],
+            "time_window": 300
+        }
+
+        result = controller._calculate_rate(sample_client.id, column_config)
+
+        # Should get approximately 333.33 bytes/sec
+        assert result is not None
+        assert 300 <= result <= 400  # Allow some tolerance
+
+    def test_calculate_rate_with_counter_reset_handles_gracefully(self, test_db, sample_client):
+        """Counter reset (current < previous) should handle gracefully"""
+        import time
+        controller = DashboardController()
+
+        now = int(time.time())
+
+        # Create a counter metric series
+        from models import MetricSeries, MetricPointsFloat
+        series = MetricSeries.get_or_create_series(
+            client_id=sample_client.id,
+            metric_name="network_transmit_bytes_total",
+            labels='{"interface": "eth0"}',
+            value_type="float"
+        )
+
+        # Simulate counter reset: previous was higher, current is lower
+        MetricPointsFloat.create(
+            series=series,
+            timestamp=now - 300,
+            value=100000.0  # High value
+        )
+        MetricPointsFloat.create(
+            series=series,
+            timestamp=now,
+            value=1000.0  # Reset to low value
+        )
+
+        column_config = {
+            "metric_name": "network_transmit_bytes_total",
+            "label_filters": [{"interface": "eth0"}],
+            "time_window": 300
+        }
+
+        result = controller._calculate_rate(sample_client.id, column_config)
+
+        # Should handle reset gracefully (returns current / time_elapsed)
+        assert result is not None
+        assert result >= 0  # Should not be negative
 
     def test_calculate_rate_with_no_previous_data_returns_none(self):
         """No historical data should return None"""
