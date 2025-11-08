@@ -21,10 +21,18 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import socket
+import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from urllib.error import HTTPError, URLError
+
+# Ensure the client directory is in Python path for script execution
+if __name__ == "__main__":
+    client_dir = Path(__file__).parent.resolve()
+    if str(client_dir) not in sys.path:
+        sys.path.insert(0, str(client_dir))
 
 # Local imports (handle both module and script execution)
 try:
