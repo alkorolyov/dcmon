@@ -21,6 +21,7 @@ except ImportError:
     from web.template_helpers import format_bytes
 
 from .config import get_metric_status, format_metric_value, METRIC_THRESHOLDS
+from .device_rules import categorize_by_device, _is_network_device, _is_storage_device
 
 logger = logging.getLogger("dcmon.dashboard")
 
@@ -512,12 +513,12 @@ class DashboardController:
                             psu_devices[device_id] = {"device": device_id}
                         psu_devices[device_id][metric_type] = metric_info
                         
-                    elif self._is_network_device(label, metric_name):
+                    elif _is_network_device(label, metric_name):
                         if device_id not in detailed_metrics["network"]:
                             detailed_metrics["network"][device_id] = {}
                         detailed_metrics["network"][device_id][metric_type] = metric_info
-                        
-                    elif self._is_storage_device(label, metric_name):
+
+                    elif _is_storage_device(label, metric_name):
                         if device_id not in storage_devices:
                             storage_devices[device_id] = {"device": device_id}
                         storage_devices[device_id][metric_type] = metric_info
@@ -687,82 +688,12 @@ class DashboardController:
         return severity_map.get(severity.upper(), "severity-info")
     
     def _categorize_by_device(self, label: str, metric_name: str) -> tuple[str, str]:
-        """Extract device identifier and metric type from label and metric name."""
-        import re
-        
-        # GPU devices - already mapped to GPU1, GPU2, etc.
-        if label.startswith('GPU'):
-            device_id = label  # GPU1, GPU2, etc.
-            if "temp" in metric_name:
-                metric_type = "Temperature"
-            elif "fan" in metric_name:
-                metric_type = "Fan Speed"
-            elif "power" in metric_name:
-                metric_type = "Power Draw"
-            elif "utilization" in metric_name:
-                metric_type = "Utilization"
-            elif "memory" in metric_name:
-                metric_type = "Memory"
-            elif "clock" in metric_name:
-                metric_type = "Clock Speed"
-            else:
-                metric_type = metric_name.replace('gpu_', '').replace('_', ' ').title()
-            return device_id, metric_type
-            
-        # PSU devices
-        elif label.startswith('PSU'):
-            device_id = label  # PSU1, PSU2, etc.
-            if "power" in metric_name or "watts" in metric_name:
-                metric_type = "Power Input"
-            elif "fan" in metric_name or "rpm" in metric_name:
-                metric_type = "Fan Speed"
-            elif "temp" in metric_name:
-                metric_type = "Temperature"
-            elif "voltage" in metric_name:
-                metric_type = "Voltage"
-            else:
-                metric_type = metric_name.replace('psu_', '').replace('_', ' ').title()
-            return device_id, metric_type
-            
-        # Network interfaces
-        elif self._is_network_device(label, metric_name):
-            # Extract interface name (eno1, eth0, etc.)
-            device_id = label
-            if "transmit" in metric_name or "tx" in metric_name:
-                metric_type = "Transmit"
-            elif "receive" in metric_name or "rx" in metric_name:
-                metric_type = "Receive"
-            else:
-                metric_type = metric_name.replace('network_', '').replace('_', ' ').title()
-            return device_id, metric_type
-            
-        # Storage devices
-        elif self._is_storage_device(label, metric_name):
-            # Extract device name (nvme0n1, sda1, etc.) or mount point (root, docker)
-            device_id = label
-            if "fs_" in metric_name:
-                if "used" in metric_name:
-                    metric_type = "Used Space"
-                elif "free" in metric_name or "avail" in metric_name:
-                    metric_type = "Free Space"
-                elif "size" in metric_name:
-                    metric_type = "Total Size"
-                else:
-                    metric_type = metric_name.replace('fs_', '').replace('_', ' ').title()
-            elif "nvme_" in metric_name:
-                if "wear" in metric_name:
-                    metric_type = "Wear Level"
-                elif "temp" in metric_name:
-                    metric_type = "Temperature"
-                else:
-                    metric_type = metric_name.replace('nvme_', '').replace('_', ' ').title()
-            else:
-                metric_type = metric_name.replace('disk_', '').replace('_', ' ').title()
-            return device_id, metric_type
-            
-        # Default fallback
-        else:
-            return label, metric_name.replace('_', ' ').title()
+        """
+        Extract device identifier and metric type from label and metric name.
+
+        Delegates to device_rules module for cleaner, table-driven categorization.
+        """
+        return categorize_by_device(label, metric_name)
     
     def _get_readable_metric_name(self, metric_name: str, metric_type: str) -> str:
         """Convert metric names to readable display names when labels are missing."""
@@ -831,31 +762,6 @@ class DashboardController:
             else:
                 return metric_name.replace('_', ' ').title()
     
-    def _is_network_device(self, label: str, metric_name: str) -> bool:
-        """Check if this is a network device metric."""
-        network_patterns = ['eno', 'eth', 'wlan', 'lo', 'bond']
-        network_metrics = ['network_', 'transmit', 'receive', 'tx_', 'rx_']
-        
-        # Check if label looks like a network interface
-        label_is_network = any(label.startswith(pattern) for pattern in network_patterns)
-        
-        # Check if metric name suggests network data
-        metric_is_network = any(pattern in metric_name for pattern in network_metrics)
-        
-        return label_is_network or metric_is_network
-    
-    def _is_storage_device(self, label: str, metric_name: str) -> bool:
-        """Check if this is a storage device metric."""
-        storage_patterns = ['nvme', 'sda', 'sdb', 'root', 'docker', '/']
-        storage_metrics = ['fs_', 'disk_', 'nvme_']
-        
-        # Check if label looks like a storage device or mount point
-        label_is_storage = any(pattern in label.lower() for pattern in storage_patterns)
-        
-        # Check if metric name suggests storage data
-        metric_is_storage = any(pattern in metric_name for pattern in storage_metrics)
-        
-        return label_is_storage or metric_is_storage
     
     def _get_metric_status_for_device(self, metric_name: str, value: float) -> str:
         """Get status class for device metrics using dashboard thresholds."""
