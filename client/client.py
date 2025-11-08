@@ -32,16 +32,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from client.config import ClientConfig
-
-# Local auth helper (keys + registration request)
+# Local imports (handle both module and script execution)
 try:
     # when run as module
+    from .config import ClientConfig
     from .auth import ClientAuth, setup_client_auth
     from .exporters import MetricsCollectorManager, LogExporterManager
     from .commands import start_websocket_command_server
 except ImportError:
     # when run as script from project root
+    from config import ClientConfig
     from auth import ClientAuth, setup_client_auth
     from exporters import MetricsCollectorManager, LogExporterManager
     from commands import start_websocket_command_server
@@ -516,8 +516,8 @@ async def run_client(config: ClientConfig) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="dcmon client")
-    parser.add_argument("--config", "-c", type=Path, default=Path("config.yaml"),
-                        help="YAML configuration file (default: config.yaml)")
+    parser.add_argument("--config", "-c", type=Path, default=Path("config.yml"),
+                        help="YAML configuration file (default: config.yml)")
     parser.add_argument("--auth-dir", dest="auth_dir",
                         help="directory for client credentials (private key, public key, client token)")
     parser.add_argument("--server",

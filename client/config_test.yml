@@ -1,0 +1,37 @@
+# dcmon Client Configuration (Test/Development Mode)
+
+# Connection settings
+server: "https://localhost:8000"     # Server URL
+auth_dir: "."                        # Directory for authentication files (client_token)
+interval: 30                         # Metrics collection interval in seconds
+websocket_port: 9000                 # Port for WebSocket command server (different from default)
+
+# Logging
+log_level: "DEBUG"                   # Log level: DEBUG, INFO, WARNING, ERROR
+
+# Runtime behavior
+once: false                          # Run once and exit (true) or continuously (false)
+registration: false                  # Force re-registration with server
+test_mode: true                      # Enable test mode features
+
+# Metrics exporters - enable/disable each type
+exporters:
+  os: true                           # OS metrics (CPU, memory, disk, network)
+  ipmi: true                         # IPMI sensor metrics
+  apt: true                          # APT package update metrics
+  nvme: true                         # NVMe drive metrics
+  nvsmi: true                        # NVIDIA GPU metrics
+  bmc_fan: true                      # BMC fan metrics
+  ipmicfg_psu: true                  # IPMI power supply metrics
+
+# OS metrics specific configuration
+os_metrics:
+  mountpoints: ["/", "/var/lib/docker"]  # Disk mountpoints to monitor
+
+# Log monitoring configuration
+log_monitoring:
+  enabled: true                      # Enable log monitoring
+  sources: ["dmesg", "journal", "syslog", "vast"]  # Log sources to monitor
+  severity_filter: "INFO"            # Minimum severity: DEBUG, INFO, WARNING, ERROR
+  max_lines_per_cycle: 50            # Max log lines to send per cycle
+  history_size: 1000                 # Number of historical entries to collect on first run

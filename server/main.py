@@ -23,7 +23,7 @@ except ImportError:
 def main():
     """Main entry point for dcmon server."""
     parser = argparse.ArgumentParser(description="dcmon server")
-    parser.add_argument("-c", "--config", help="Path to YAML config", default="config.yaml")
+    parser.add_argument("-c", "--config", help="Path to YAML config", default="config.yml")
     args = parser.parse_args()
 
     # Load configuration

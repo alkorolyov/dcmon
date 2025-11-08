@@ -130,16 +130,8 @@ async def start_websocket_command_server(config, client_id: int, client_token: s
     """Start WebSocket server for handling commands from dcmon server."""
     handler = WebSocketCommandHandler(config)
     
-    # Use a different port for WebSocket commands (server_port + 1)
-    try:
-        server_url = config.server.replace("https://", "").replace("http://", "")
-        if ":" in server_url:
-            host, port = server_url.split(":", 1)
-            websocket_port = int(port) + 1000  # Use server port + 1000 for client WebSocket
-        else:
-            websocket_port = 9000  # Default WebSocket port
-    except:
-        websocket_port = 9000
+    # Use WebSocket port from config
+    websocket_port = config.websocket_port
     
     logger.info(f"Starting WebSocket command server on port {websocket_port}")
     

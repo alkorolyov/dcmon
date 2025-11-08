@@ -1,11 +1,12 @@
 import argparse
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any
 
 import yaml
 
-from client.client import logger
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -14,6 +15,7 @@ class ClientConfig:
     auth_dir: str = "/etc/dcmon"
     server: str = "https://127.0.0.1:8000"
     interval: int = 30
+    websocket_port: int = 9000  # Port for WebSocket command server
     log_level: str = "INFO"
     once: bool = False
     registration: bool = False
