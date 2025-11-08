@@ -126,70 +126,73 @@ class WebSocketCommandHandler:
             }
 
 
-async def start_websocket_command_server(config, client_id: int, client_token: str):
-    """Start WebSocket server for handling commands from dcmon server."""
+async def start_websocket_command_client(config, client_id: int, client_token: str):
+    """Connect to server's WebSocket endpoint for handling commands."""
     handler = WebSocketCommandHandler(config)
-    
-    # Use WebSocket port from config
-    websocket_port = config.websocket_port
-    
-    logger.info(f"Starting WebSocket command server on port {websocket_port}")
-    
-    async def handle_websocket(websocket, path):
-        """Handle incoming WebSocket connections from server."""
+
+    # Parse server URL to construct WebSocket URL
+    server_url = config.server.rstrip("/")
+    # Convert http(s):// to ws(s)://
+    ws_url = server_url.replace("https://", "wss://").replace("http://", "ws://")
+    ws_endpoint = f"{ws_url}/ws/client/{client_id}"
+
+    logger.info(f"Connecting to WebSocket command endpoint: {ws_endpoint}")
+
+    # Reconnection loop
+    while True:
         try:
-            logger.info(f"WebSocket command connection established from {websocket.remote_address}")
-            
-            # Authenticate using client token
-            auth_message = await websocket.recv()
-            auth_data = json.loads(auth_message)
-            
-            if auth_data.get("client_token") != client_token:
-                await websocket.send(json.dumps({"error": "Authentication failed"}))
-                return
-                
-            await websocket.send(json.dumps({"status": "authenticated"}))
-            
-            # Wait for command
-            command_message = await websocket.recv()
-            command_data = json.loads(command_message)
-            
-            command_type = command_data.get("command_type")
-            command_payload = command_data.get("command_data", {})
-            
-            logger.info(f"Executing command: {command_type}")
-            
-            # Execute command
-            result = await handler.handle_command(command_type, command_payload)
-            
-            # Send result back
-            await websocket.send(json.dumps({
-                "status": "completed",
-                "result": result
-            }))
-            
-            logger.info(f"Command {command_type} completed successfully")
-            
-        except websockets.exceptions.ConnectionClosed:
-            logger.info("WebSocket connection closed")
+            # Connect to server's WebSocket endpoint
+            async with websockets.connect(ws_endpoint, ssl=_create_ssl_context()) as websocket:
+                logger.info(f"Connected to server WebSocket for commands")
+
+                # Listen for commands from server
+                while True:
+                    try:
+                        # Wait for command from server
+                        message = await websocket.recv()
+                        command_data = json.loads(message)
+
+                        command_type = command_data.get("command_type")
+                        command_payload = command_data.get("command_data", {})
+
+                        logger.info(f"Received command: {command_type}")
+
+                        # Execute command
+                        result = await handler.handle_command(command_type, command_payload)
+
+                        # Send result back
+                        await websocket.send(json.dumps({
+                            "status": "completed",
+                            "result": result
+                        }))
+
+                        logger.info(f"Command {command_type} completed successfully")
+
+                    except websockets.exceptions.ConnectionClosed:
+                        logger.warning("WebSocket connection closed by server")
+                        break
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Invalid JSON received: {e}")
+                    except Exception as e:
+                        logger.error(f"Error handling command: {e}")
+                        try:
+                            await websocket.send(json.dumps({
+                                "status": "error",
+                                "error": str(e)
+                            }))
+                        except:
+                            pass
+
         except Exception as e:
-            logger.error(f"WebSocket command error: {e}")
-            try:
-                await websocket.send(json.dumps({
-                    "status": "error",
-                    "error": str(e)
-                }))
-            except:
-                pass
-    
-    # Start WebSocket server
-    try:
-        await websockets.serve(handle_websocket, "0.0.0.0", websocket_port)
-        logger.info(f"WebSocket command server started on port {websocket_port}")
-        
-        # Keep running
-        await asyncio.Future()  # Run forever
-        
-    except Exception as e:
-        logger.error(f"Failed to start WebSocket command server: {e}")
-        raise
+            logger.error(f"WebSocket connection failed: {e}")
+            logger.info("Reconnecting in 10 seconds...")
+            await asyncio.sleep(10)
+
+
+def _create_ssl_context():
+    """Create SSL context that trusts self-signed certificates."""
+    import ssl
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    return ssl_context

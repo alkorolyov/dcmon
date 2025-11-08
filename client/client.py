@@ -38,13 +38,13 @@ try:
     from .config import ClientConfig
     from .auth import ClientAuth, setup_client_auth
     from .exporters import MetricsCollectorManager, LogExporterManager
-    from .commands import start_websocket_command_server
+    from .commands import start_websocket_command_client
 except ImportError:
     # when run as script from project root
     from config import ClientConfig
     from auth import ClientAuth, setup_client_auth
     from exporters import MetricsCollectorManager, LogExporterManager
-    from commands import start_websocket_command_server
+    from commands import start_websocket_command_client
 
 
 logger = logging.getLogger(__name__)
@@ -332,11 +332,11 @@ def send_metrics(server_base: str, client_token: str, metrics: List[Dict[str, An
     return _post_json(url, data, headers)
 
 
-def register_client_interactively(auth: ClientAuth, server_base: str, hostname: str, test_mode: bool = False) -> str:
+def register_client_interactively(auth: ClientAuth, server_base: str, hostname: str, test_mode: bool = False) -> Tuple[str, int]:
     """
     Register client with server using admin authentication.
     In test mode, automatically uses dev token. In production, prompts for admin token.
-    Returns client_token on success, raises SystemExit on failure.
+    Returns (client_token, client_id) on success, raises SystemExit on failure.
     """
     if test_mode:
         print(f"\n🔧 Test mode detected - using dev admin token for registration of {hostname}")
@@ -386,12 +386,16 @@ def register_client_interactively(auth: ClientAuth, server_base: str, hostname: 
     try:
         response = _post_json(url, req, headers)
         client_token = response.get("client_token")
+        client_id = response.get("client_id")
+
         if not client_token:
             raise SystemExit("ERROR: Server did not return client_token in registration response.")
-        
+        if not client_id:
+            raise SystemExit("ERROR: Server did not return client_id in registration response.")
+
         print("✅ Client registered successfully!")
-        logger.info("Client registered with server: %s", server_base)
-        return client_token
+        logger.info("Client registered with server: %s (client_id=%s)", server_base, client_id)
+        return client_token, client_id
         
     except HTTPError as e:
         try:
@@ -424,16 +428,20 @@ async def run_client(config: ClientConfig) -> None:
         print(json.dumps(req, indent=2))
         return
 
-    # Ensure client token exists; otherwise register interactively
+    # Ensure client token and ID exist; otherwise register interactively
     token = auth.load_client_token()
-    if not token:
+    client_id = auth.load_client_id()
+
+    if not token or not client_id:
         hostname = socket.gethostname()
         # Interactive registration with admin token prompt
-        token = register_client_interactively(auth, config.server, hostname, config.test_mode)
-        # Save the client token for future use
+        token, client_id = register_client_interactively(auth, config.server, hostname, config.test_mode)
+        # Save the client token and ID for future use
         if not auth.save_client_token(token):
             raise SystemExit("ERROR: Failed to save client token after registration.")
-        logger.info("Client token saved successfully")
+        if not auth.save_client_id(client_id):
+            raise SystemExit("ERROR: Failed to save client ID after registration.")
+        logger.info("Client token and ID saved successfully")
 
     # Generate hardware hash once for metrics sending
     hw_info = detect_hardware()
@@ -444,11 +452,7 @@ async def run_client(config: ClientConfig) -> None:
 
     # Initialize log exporter manager with auth_dir and config
     log_exporter = LogExporterManager(Path(config.auth_dir), config.__dict__)
-    
-    # Get client ID for WebSocket server (we'll need to modify this once we have proper client registration)
-    # For now, use a simple hash of the token as client_id
-    client_id = abs(hash(token)) % 10000  # Simple client ID generation
-    
+
     async def metrics_loop():
         """Main metrics collection loop."""
         logger.info("metrics loop starting; posting to %s every %ss", config.server, config.interval)
@@ -507,10 +511,10 @@ async def run_client(config: ClientConfig) -> None:
         # For --once mode, only run metrics
         await metrics_loop()
     else:
-        # Run both metrics and WebSocket command server concurrently
+        # Run both metrics and WebSocket command client concurrently
         await asyncio.gather(
             metrics_loop(),
-            start_websocket_command_server(config, client_id, token)
+            start_websocket_command_client(config, client_id, token)
         )
 
 

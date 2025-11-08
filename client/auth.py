@@ -51,6 +51,7 @@ class ClientAuth:
         self.private_key_file = self.auth_dir / "client.key"
         self.public_key_file = self.auth_dir / "client.pub"
         self.token_file = self.auth_dir / "client_token"
+        self.client_id_file = self.auth_dir / "client_id"
 
         if not CRYPTO_AVAILABLE:
             raise ImportError("cryptography package is required (pip install cryptography)")
@@ -170,7 +171,7 @@ class ClientAuth:
             logger.error("failed to create registration request: %s", e)
             return None
 
-    # ---------- Client token persistence ----------
+    # ---------- Client token and ID persistence ----------
 
     def save_client_token(self, token: str) -> bool:
         try:
@@ -189,6 +190,27 @@ class ClientAuth:
             return None
         except Exception as e:
             logger.error("failed to load client token: %s", e)
+            return None
+
+    def save_client_id(self, client_id: int) -> bool:
+        """Save the client ID received from server during registration."""
+        try:
+            self.auth_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self.client_id_file.write_text(str(client_id))
+            self.client_id_file.chmod(0o600)
+            return True
+        except Exception as e:
+            logger.error("failed to save client ID: %s", e)
+            return False
+
+    def load_client_id(self) -> Optional[int]:
+        """Load the client ID assigned by the server."""
+        try:
+            if self.client_id_file.exists():
+                return int(self.client_id_file.read_text().strip())
+            return None
+        except Exception as e:
+            logger.error("failed to load client ID: %s", e)
             return None
 
 
