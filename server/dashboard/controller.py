@@ -13,11 +13,11 @@ from datetime import datetime, timedelta
 # Support running as script or as package
 try:
     from ..models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
-    from ..api.metric_queries import MetricQueryBuilder, CPU_SENSORS, VRM_SENSORS
+    from ..api.queries import MetricQueryBuilder, CPU_SENSORS, VRM_SENSORS
     from ..web.template_helpers import format_bytes
 except ImportError:
     from models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
-    from api.metric_queries import MetricQueryBuilder, CPU_SENSORS, VRM_SENSORS
+    from api.queries import MetricQueryBuilder, CPU_SENSORS, VRM_SENSORS
     from web.template_helpers import format_bytes
 
 from .config import get_metric_status, format_metric_value, METRIC_THRESHOLDS

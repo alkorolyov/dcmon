@@ -17,12 +17,12 @@ try:
     from ...models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
     from ..schemas import MetricsBatchRequest
     from ..dependencies import AuthDependencies
-    from ..metric_queries import MetricQueryBuilder, get_cpu_timeseries, get_vrm_timeseries
+    from ..queries import MetricQueryBuilder
 except ImportError:
     from models import Client, MetricSeries, MetricPointsInt, MetricPointsFloat, LogEntry
     from api.schemas import MetricsBatchRequest
     from api.dependencies import AuthDependencies
-    from api.metric_queries import MetricQueryBuilder
+    from api.queries import MetricQueryBuilder
 
 logger = logging.getLogger("dcmon.server")
 
@@ -186,7 +186,7 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
                     logger.warning(f"Invalid label filters JSON: {labels}")
             
             # Use the rate calculation function  
-            from ..metric_queries import MetricQueryBuilder
+            from ..queries import MetricQueryBuilder
             df = MetricQueryBuilder.get_rate_timeseries(
                 metric_name=metric_names,
                 start_time=start_time,
@@ -274,7 +274,7 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
                     logger.warning(f"Invalid label filters JSON: {labels}")
             
             # Use the clean get_timeseries_data function
-            from ..metric_queries import MetricQueryBuilder
+            from ..queries import MetricQueryBuilder
             df = MetricQueryBuilder.get_timeseries_data(
                 metric_name=metric_names,
                 start_time=start_time,
