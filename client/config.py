@@ -57,8 +57,7 @@ class ClientConfig:
     def from_file(cls, config_path: Path) -> "ClientConfig":
         """Load configuration from YAML file"""
         if not config_path.exists():
-            logger.debug(f"Config file not found: {config_path}, using defaults")
-            return cls()
+            raise FileNotFoundError(f"Config file not found: {config_path}")
 
         try:
             with open(config_path, "r") as f:
@@ -66,8 +65,7 @@ class ClientConfig:
             logger.debug(f"Loaded config from {config_path}: {data}")
             return cls(**data)
         except Exception as e:
-            logger.warning(f"Failed to load config from {config_path}: {e}, using defaults")
-            return cls()
+            raise RuntimeError(f"Failed to load config from {config_path}: {e}")
 
     def override_with_args(self, args: argparse.Namespace) -> "ClientConfig":
         """Override config with command line arguments if provided"""
