@@ -10,9 +10,9 @@ import pandas as pd
 from typing import List, Optional, Dict, Union
 
 try:
-    from ...models import Client, MetricSeries, MetricPointsFloat
+    from ...models import Client, MetricSeries, MetricPoints
 except ImportError:
-    from models import Client, MetricSeries, MetricPointsFloat
+    from models import Client, MetricSeries, MetricPoints
 
 from .utils import filter_series_by_labels
 
@@ -77,17 +77,17 @@ def get_raw_timeseries(
             for s in series_list
         ])
 
-        # Get float points (all metrics stored as float per architecture decision)
-        float_query = (MetricPointsFloat.select()
-                      .where(
-                          (MetricPointsFloat.series.in_(series_ids)) &
-                          (MetricPointsFloat.timestamp >= start_time) &
-                          (MetricPointsFloat.timestamp <= end_time)
-                      )
-                      .order_by(MetricPointsFloat.timestamp)
-                      .dicts())
+        # Get metric points (all metrics stored as float in unified table)
+        points_query = (MetricPoints.select()
+                       .where(
+                           (MetricPoints.series.in_(series_ids)) &
+                           (MetricPoints.timestamp >= start_time) &
+                           (MetricPoints.timestamp <= end_time)
+                       )
+                       .order_by(MetricPoints.timestamp)
+                       .dicts())
 
-        df = pd.DataFrame(list(float_query)) if series_ids else pd.DataFrame()
+        df = pd.DataFrame(list(points_query)) if series_ids else pd.DataFrame()
 
         if df.empty:
             return pd.DataFrame()

@@ -18,7 +18,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'server'))
 
-from models import Client, MetricSeries, MetricPointsFloat, LogEntry
+from models import Client, MetricSeries, MetricPoints, LogEntry
 from api.schemas import MetricsBatchRequest, MetricRecord, LogEntryData
 
 
@@ -127,9 +127,10 @@ class TestMetricPointStorage:
             value_type="float"
         )
 
-        point = MetricPointsFloat.create(
+        point = MetricPoints.create(
             series=series,
             timestamp=now,
+            sent_at=now,
             value=65.5
         )
 
@@ -147,9 +148,10 @@ class TestMetricPointStorage:
             value_type="float"
         )
 
-        point = MetricPointsFloat.create(
+        point = MetricPoints.create(
             series=series,
             timestamp=now,
+            sent_at=now,
             value=float(1000000)  # Integer value as float
         )
 
@@ -168,9 +170,10 @@ class TestMetricPointStorage:
         )
 
         large_value = 18e12  # 18 TB
-        point = MetricPointsFloat.create(
+        point = MetricPoints.create(
             series=series,
             timestamp=now,
+            sent_at=now,
             value=large_value
         )
 
@@ -188,12 +191,12 @@ class TestMetricPointStorage:
         )
 
         points = [
-            {"series": series.id, "timestamp": now - 60, "value": 50.0},
-            {"series": series.id, "timestamp": now - 30, "value": 55.0},
-            {"series": series.id, "timestamp": now, "value": 60.0},
+            {"series": series.id, "timestamp": now - 60, "sent_at": now - 60, "value": 50.0},
+            {"series": series.id, "timestamp": now - 30, "sent_at": now - 30, "value": 55.0},
+            {"series": series.id, "timestamp": now, "sent_at": now, "value": 60.0},
         ]
 
-        inserted = MetricPointsFloat.insert_many(points).execute()
+        inserted = MetricPoints.insert_many(points).execute()
 
         assert inserted == 3
 
@@ -208,15 +211,15 @@ class TestMetricPointStorage:
         )
 
         # Insert first point
-        MetricPointsFloat.create(series=series, timestamp=now, value=50.0)
+        MetricPoints.create(series=series, timestamp=now, sent_at=now, value=50.0)
 
         # Try to insert duplicate timestamp
-        points = [{"series": series.id, "timestamp": now, "value": 60.0}]
-        inserted = MetricPointsFloat.insert_many(points).on_conflict_ignore().execute()
+        points = [{"series": series.id, "timestamp": now, "sent_at": now, "value": 60.0}]
+        inserted = MetricPoints.insert_many(points).on_conflict_ignore().execute()
 
         # SQLite returns number of rows modified, which may be 1 even when ignored
         # Just verify original value preserved
-        point = MetricPointsFloat.get(MetricPointsFloat.series == series, MetricPointsFloat.timestamp == now)
+        point = MetricPoints.get(MetricPoints.series == series, MetricPoints.timestamp == now)
         assert point.value == 50.0
 
 
@@ -247,9 +250,10 @@ class TestMetricsBatchSubmission:
             value_type=batch.metrics[0].value_type
         )
 
-        point = MetricPointsFloat.create(
+        point = MetricPoints.create(
             series=series,
             timestamp=batch.metrics[0].timestamp,
+            sent_at=batch.metrics[0].timestamp,
             value=batch.metrics[0].value
         )
 
@@ -275,7 +279,7 @@ class TestMetricsBatchSubmission:
                 labels=None,
                 value_type=metric.value_type
             )
-            MetricPointsFloat.create(series=series, timestamp=metric.timestamp, value=metric.value)
+            MetricPoints.create(series=series, timestamp=metric.timestamp, sent_at=metric.timestamp, value=metric.value)
 
         # Verify all metrics stored
         cpu_series = MetricSeries.get(
@@ -322,7 +326,7 @@ class TestMetricsBatchSubmission:
                 labels=labels_json,
                 value_type=metric.value_type
             )
-            MetricPointsFloat.create(series=series, timestamp=metric.timestamp, value=metric.value)
+            MetricPoints.create(series=series, timestamp=metric.timestamp, sent_at=metric.timestamp, value=metric.value)
 
         # Should create two separate series
         series_count = MetricSeries.select().where(

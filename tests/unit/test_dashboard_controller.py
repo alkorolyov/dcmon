@@ -113,7 +113,7 @@ class TestCalculateRate:
         now = int(time.time())
 
         # Create a counter metric series
-        from models import MetricSeries, MetricPointsFloat
+        from models import MetricSeries, MetricPoints
         series = MetricSeries.get_or_create_series(
             client_id=sample_client.id,
             metric_name="network_receive_bytes_total",
@@ -123,14 +123,16 @@ class TestCalculateRate:
 
         # Create data points: 5 minutes ago and now
         # Rate should be (100000 - 0) / 300 = 333.33 bytes/sec
-        MetricPointsFloat.create(
+        MetricPoints.create(
             series=series,
             timestamp=now - 300,
+            sent_at=now - 300,
             value=0.0
         )
-        MetricPointsFloat.create(
+        MetricPoints.create(
             series=series,
             timestamp=now,
+            sent_at=now,
             value=100000.0
         )
 
@@ -154,7 +156,7 @@ class TestCalculateRate:
         now = int(time.time())
 
         # Create a counter metric series
-        from models import MetricSeries, MetricPointsFloat
+        from models import MetricSeries, MetricPoints
         series = MetricSeries.get_or_create_series(
             client_id=sample_client.id,
             metric_name="network_transmit_bytes_total",
@@ -163,14 +165,16 @@ class TestCalculateRate:
         )
 
         # Simulate counter reset: previous was higher, current is lower
-        MetricPointsFloat.create(
+        MetricPoints.create(
             series=series,
             timestamp=now - 300,
+            sent_at=now - 300,
             value=100000.0  # High value
         )
-        MetricPointsFloat.create(
+        MetricPoints.create(
             series=series,
             timestamp=now,
+            sent_at=now,
             value=1000.0  # Reset to low value
         )
 

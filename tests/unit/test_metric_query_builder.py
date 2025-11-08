@@ -9,7 +9,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'server'))
 
 from api.metric_queries import MetricQueryBuilder, CPU_SENSORS, VRM_SENSORS
-from models import MetricSeries, Client, MetricPointsFloat
+from models import MetricSeries, Client, MetricPoints
 
 
 class TestFilterSeriesByLabels:
@@ -459,14 +459,14 @@ class TestGetRateTimeseries:
         for i in range(10):
             timestamp = now - ((9 - i) * 30)
 
-            MetricPointsFloat.create(
+            MetricPoints.create(
                 series=read_series,
                 timestamp=timestamp,
                 sent_at=timestamp,
                 value=base_read + (i * 30 * rate_read)
             )
 
-            MetricPointsFloat.create(
+            MetricPoints.create(
                 series=write_series,
                 timestamp=timestamp,
                 sent_at=timestamp,

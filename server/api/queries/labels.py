@@ -11,9 +11,9 @@ import re
 from typing import Dict
 
 try:
-    from ...models import MetricSeries, MetricPointsInt, MetricPointsFloat
+    from ...models import MetricSeries, MetricPoints
 except ImportError:
-    from models import MetricSeries, MetricPointsInt, MetricPointsFloat
+    from models import MetricSeries, MetricPoints
 
 logger = logging.getLogger("dcmon.server")
 
@@ -168,23 +168,12 @@ def get_all_latest_metrics_for_client(client_id: int) -> Dict[str, Dict[str, flo
 
             # Get latest value for this series
             latest_value = None
-
-            # Try integer points first
-            if series.value_type == "int":
-                latest_point = (MetricPointsInt.select()
-                              .where(MetricPointsInt.series == series.id)
-                              .order_by(MetricPointsInt.timestamp.desc())
-                              .first())
-                if latest_point:
-                    latest_value = float(latest_point.value)
-            else:
-                # Try float points
-                latest_point = (MetricPointsFloat.select()
-                              .where(MetricPointsFloat.series == series.id)
-                              .order_by(MetricPointsFloat.timestamp.desc())
-                              .first())
-                if latest_point:
-                    latest_value = float(latest_point.value)
+            latest_point = (MetricPoints.select()
+                          .where(MetricPoints.series == series.id)
+                          .order_by(MetricPoints.timestamp.desc())
+                          .first())
+            if latest_point:
+                latest_value = float(latest_point.value)
 
             # Store in structured dict
             if latest_value is not None:

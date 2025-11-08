@@ -9,9 +9,9 @@ import logging
 from typing import List, Optional, Dict, Union
 
 try:
-    from ...models import MetricSeries, MetricPointsInt, MetricPointsFloat
+    from ...models import MetricSeries, MetricPoints
 except ImportError:
-    from models import MetricSeries, MetricPointsInt, MetricPointsFloat
+    from models import MetricSeries, MetricPoints
 
 from .utils import filter_series_by_labels
 
@@ -58,19 +58,9 @@ def get_latest_metric_value(
 
         if aggregation is None:
             # Original behavior: latest timestamp from any series
-            # Try int points first
-            latest_point = (MetricPointsInt.select()
-                          .where(MetricPointsInt.series.in_(series_ids))
-                          .order_by(MetricPointsInt.timestamp.desc())
-                          .first())
-
-            if latest_point:
-                return float(latest_point.value)
-
-            # Try float points
-            latest_point = (MetricPointsFloat.select()
-                          .where(MetricPointsFloat.series.in_(series_ids))
-                          .order_by(MetricPointsFloat.timestamp.desc())
+            latest_point = (MetricPoints.select()
+                          .where(MetricPoints.series.in_(series_ids))
+                          .order_by(MetricPoints.timestamp.desc())
                           .first())
 
             if latest_point:
@@ -79,48 +69,23 @@ def get_latest_metric_value(
             return None
         else:
             # Aggregation behavior: find latest timestamp, then aggregate across all series at that timestamp
-            import time
+            # Find the latest timestamp across all series
+            latest_timestamp = (MetricPoints.select(MetricPoints.timestamp)
+                              .where(MetricPoints.series.in_(series_ids))
+                              .order_by(MetricPoints.timestamp.desc())
+                              .scalar())
 
-            # Find the latest timestamp across all series (int and float)
-            latest_int_ts = (MetricPointsInt.select(MetricPointsInt.timestamp)
-                           .where(MetricPointsInt.series.in_(series_ids))
-                           .order_by(MetricPointsInt.timestamp.desc())
-                           .scalar())
-
-            latest_float_ts = (MetricPointsFloat.select(MetricPointsFloat.timestamp)
-                             .where(MetricPointsFloat.series.in_(series_ids))
-                             .order_by(MetricPointsFloat.timestamp.desc())
-                             .scalar())
-
-            # Get the most recent timestamp between int and float
-            timestamps = [ts for ts in [latest_int_ts, latest_float_ts] if ts is not None]
-            if not timestamps:
+            if latest_timestamp is None:
                 return None
 
-            latest_timestamp = max(timestamps)
-
             # Get all values at the latest timestamp
-            values = []
+            points = (MetricPoints.select()
+                    .where(
+                        (MetricPoints.series.in_(series_ids)) &
+                        (MetricPoints.timestamp == latest_timestamp)
+                    ))
 
-            # Get int values at latest timestamp
-            int_points = (MetricPointsInt.select()
-                        .where(
-                            (MetricPointsInt.series.in_(series_ids)) &
-                            (MetricPointsInt.timestamp == latest_timestamp)
-                        ))
-
-            for point in int_points:
-                values.append(float(point.value))
-
-            # Get float values at latest timestamp
-            float_points = (MetricPointsFloat.select()
-                          .where(
-                              (MetricPointsFloat.series.in_(series_ids)) &
-                              (MetricPointsFloat.timestamp == latest_timestamp)
-                          ))
-
-            for point in float_points:
-                values.append(float(point.value))
+            values = [float(point.value) for point in points]
 
             if not values:
                 return None
