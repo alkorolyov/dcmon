@@ -46,8 +46,7 @@ def create_metrics_routes(auth_deps: AuthDependencies) -> APIRouter:
             series = MetricSeries.get_or_create_series(
                 client_id=client.id,
                 metric_name=m.metric_name,
-                labels=labels_json,
-                value_type=m.value_type
+                labels=labels_json
             )
 
             # Store all metrics as float (architecture decision)

@@ -32,19 +32,8 @@ class RegistrationRequest(BaseModel):
 class MetricRecord(BaseModel):
     timestamp: int
     metric_name: str = Field(..., min_length=1)
-    value_type: str = Field(..., pattern="^(int|float)$")
-    value: float  # Accept as float, will be cast to int if value_type is "int"
+    value: float  # All values stored as float
     labels: Optional[Dict[str, Any]] = None
-
-    @model_validator(mode="after")
-    def _validate_value_type(self) -> "MetricRecord":
-        if self.value_type == "int":
-            # Validate that the value can be converted to int
-            try:
-                int(self.value)
-            except (ValueError, OverflowError):
-                raise ValueError(f"value {self.value} cannot be converted to integer")
-        return self
 
 
 class LogEntryData(BaseModel):

@@ -118,7 +118,6 @@ class TestCalculateRate:
             client_id=sample_client.id,
             metric_name="network_receive_bytes_total",
             labels='{"interface": "eth0"}',
-            value_type="float"
         )
 
         # Create data points: 5 minutes ago and now
@@ -161,7 +160,6 @@ class TestCalculateRate:
             client_id=sample_client.id,
             metric_name="network_transmit_bytes_total",
             labels='{"interface": "eth0"}',
-            value_type="float"
         )
 
         # Simulate counter reset: previous was higher, current is lower

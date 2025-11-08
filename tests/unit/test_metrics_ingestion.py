@@ -31,7 +31,6 @@ class TestMetricSeriesCreation:
             client_id=sample_client.id,
             metric_name="cpu_usage_percent",
             labels=None,
-            value_type="float"
         )
 
         assert series is not None
@@ -46,7 +45,6 @@ class TestMetricSeriesCreation:
             client_id=sample_client.id,
             metric_name="disk_read_bytes_total",
             labels=labels_json,
-            value_type="float"
         )
 
         assert series is not None
@@ -63,7 +61,6 @@ class TestMetricSeriesCreation:
             client_id=sample_client.id,
             metric_name="network_receive_bytes_total",
             labels=labels_json,
-            value_type="float"
         )
 
         # Get second time - should return same series
@@ -71,7 +68,6 @@ class TestMetricSeriesCreation:
             client_id=sample_client.id,
             metric_name="network_receive_bytes_total",
             labels=labels_json,
-            value_type="float"
         )
 
         assert series1.id == series2.id
@@ -82,14 +78,12 @@ class TestMetricSeriesCreation:
             client_id=sample_client.id,
             metric_name="disk_read_bytes_total",
             labels=json.dumps({"device": "nvme0n1"}),
-            value_type="float"
         )
 
         series2 = MetricSeries.get_or_create_series(
             client_id=sample_client.id,
             metric_name="disk_read_bytes_total",
             labels=json.dumps({"device": "sda"}),
-            value_type="float"
         )
 
         assert series1.id != series2.id
@@ -100,14 +94,12 @@ class TestMetricSeriesCreation:
             client_id=sample_clients[0].id,
             metric_name="cpu_usage_percent",
             labels=None,
-            value_type="float"
         )
 
         series2 = MetricSeries.get_or_create_series(
             client_id=sample_clients[1].id,
             metric_name="cpu_usage_percent",
             labels=None,
-            value_type="float"
         )
 
         assert series1.id != series2.id
@@ -124,7 +116,6 @@ class TestMetricPointStorage:
             client_id=sample_client.id,
             metric_name="cpu_usage_percent",
             labels=None,
-            value_type="float"
         )
 
         point = MetricPoints.create(
@@ -145,7 +136,6 @@ class TestMetricPointStorage:
             client_id=sample_client.id,
             metric_name="disk_read_bytes_total",
             labels=None,
-            value_type="float"
         )
 
         point = MetricPoints.create(
@@ -166,7 +156,6 @@ class TestMetricPointStorage:
             client_id=sample_client.id,
             metric_name="disk_read_bytes_total",
             labels=None,
-            value_type="float"
         )
 
         large_value = 18e12  # 18 TB
@@ -187,7 +176,6 @@ class TestMetricPointStorage:
             client_id=sample_client.id,
             metric_name="cpu_usage_percent",
             labels=None,
-            value_type="float"
         )
 
         points = [
@@ -207,7 +195,6 @@ class TestMetricPointStorage:
             client_id=sample_client.id,
             metric_name="cpu_usage_percent",
             labels=None,
-            value_type="float"
         )
 
         # Insert first point
@@ -235,7 +222,6 @@ class TestMetricsBatchSubmission:
                 MetricRecord(
                     timestamp=now,
                     metric_name="cpu_usage_percent",
-                    value_type="float",
                     value=65.5,
                     labels=None
                 )
@@ -247,7 +233,6 @@ class TestMetricsBatchSubmission:
             client_id=sample_client.id,
             metric_name=batch.metrics[0].metric_name,
             labels=None,
-            value_type=batch.metrics[0].value_type
         )
 
         point = MetricPoints.create(
@@ -265,9 +250,9 @@ class TestMetricsBatchSubmission:
 
         batch = MetricsBatchRequest(
             metrics=[
-                MetricRecord(timestamp=now, metric_name="cpu_usage_percent", value_type="float", value=65.5),
-                MetricRecord(timestamp=now, metric_name="memory_usage_percent", value_type="float", value=75.2),
-                MetricRecord(timestamp=now, metric_name="disk_usage_percent", value_type="float", value=45.8),
+                MetricRecord(timestamp=now, metric_name="cpu_usage_percent", value=65.5),
+                MetricRecord(timestamp=now, metric_name="memory_usage_percent", value=75.2),
+                MetricRecord(timestamp=now, metric_name="disk_usage_percent", value=45.8),
             ]
         )
 
@@ -277,7 +262,6 @@ class TestMetricsBatchSubmission:
                 client_id=sample_client.id,
                 metric_name=metric.metric_name,
                 labels=None,
-                value_type=metric.value_type
             )
             MetricPoints.create(series=series, timestamp=metric.timestamp, sent_at=metric.timestamp, value=metric.value)
 
@@ -303,14 +287,12 @@ class TestMetricsBatchSubmission:
                 MetricRecord(
                     timestamp=now,
                     metric_name="disk_read_bytes_total",
-                    value_type="float",
                     value=1000000.0,
                     labels={"device": "nvme0n1"}
                 ),
                 MetricRecord(
                     timestamp=now,
                     metric_name="disk_read_bytes_total",
-                    value_type="float",
                     value=500000.0,
                     labels={"device": "sda"}
                 ),
@@ -324,7 +306,6 @@ class TestMetricsBatchSubmission:
                 client_id=sample_client.id,
                 metric_name=metric.metric_name,
                 labels=labels_json,
-                value_type=metric.value_type
             )
             MetricPoints.create(series=series, timestamp=metric.timestamp, sent_at=metric.timestamp, value=metric.value)
 
@@ -345,7 +326,6 @@ class TestMetricsBatchSubmission:
                 MetricRecord(
                     timestamp=future_time,
                     metric_name="cpu_usage_percent",
-                    value_type="float",
                     value=65.5
                 )
             ]
@@ -543,38 +523,6 @@ class TestMetricValidation:
             MetricRecord(
                 timestamp=int(time.time()),
                 metric_name="",  # Empty not allowed
-                value_type="float",
                 value=65.5
             )
 
-    def test_value_type_validation(self):
-        """Value type must be int or float"""
-        with pytest.raises(Exception):  # Pydantic validation error
-            MetricRecord(
-                timestamp=int(time.time()),
-                metric_name="cpu_usage",
-                value_type="string",  # Invalid
-                value=65.5
-            )
-
-    def test_integer_value_validation(self):
-        """Integer value_type should validate value is convertible to int"""
-        # Valid integer
-        metric = MetricRecord(
-            timestamp=int(time.time()),
-            metric_name="counter",
-            value_type="int",
-            value=100.0  # Float representation of integer
-        )
-        assert metric.value == 100.0
-
-        # Pydantic validation allows 100.5 to be converted to int (truncates)
-        # This test documents current behavior - fractional values are allowed
-        metric2 = MetricRecord(
-            timestamp=int(time.time()),
-            metric_name="counter",
-            value_type="int",
-            value=100.5
-        )
-        # Value is stored as-is (will be cast to int during storage)
-        assert metric2.value == 100.5

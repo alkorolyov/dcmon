@@ -84,27 +84,26 @@ def collect_vastai_metrics():
             # Current timestamp
             timestamp = int(time.time())
 
-            # Define the 8 metrics to collect
+            # Define the 8 metrics to collect (all stored as float)
             metrics_to_store = [
-                ('vast_listed', int(machine.get('listed', 0)), 'int'),
-                ('vast_reliability', machine.get('reliability2', 0.0), 'float'),
-                ('vast_gpu_earn', earnings.get('gpu_earn', 0.0), 'float'),
-                ('vast_storage_earn', earnings.get('sto_earn', 0.0), 'float'),
-                ('vast_bw_up_earn', earnings.get('bwu_earn', 0.0), 'float'),
-                ('vast_bw_down_earn', earnings.get('bwd_earn', 0.0), 'float'),
-                ('vast_rentals_interruptible', rentals_interruptible, 'int'),
-                ('vast_rentals_ondemand', rentals_ondemand, 'int'),
+                ('vast_listed', int(machine.get('listed', 0))),
+                ('vast_reliability', machine.get('reliability2', 0.0)),
+                ('vast_gpu_earn', earnings.get('gpu_earn', 0.0)),
+                ('vast_storage_earn', earnings.get('sto_earn', 0.0)),
+                ('vast_bw_up_earn', earnings.get('bwu_earn', 0.0)),
+                ('vast_bw_down_earn', earnings.get('bwd_earn', 0.0)),
+                ('vast_rentals_interruptible', rentals_interruptible),
+                ('vast_rentals_ondemand', rentals_ondemand),
             ]
 
             # Store each metric
-            for metric_name, value, value_type in metrics_to_store:
+            for metric_name, value in metrics_to_store:
                 try:
                     # Get or create metric series
                     series = MetricSeries.get_or_create_series(
                         client_id=db_client.id,
                         metric_name=metric_name,
-                        labels=labels_json,
-                        value_type=value_type
+                        labels=labels_json
                     )
 
                     # Store metric point (all stored as float per architecture)

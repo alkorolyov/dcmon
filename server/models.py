@@ -120,7 +120,6 @@ class MetricSeries(BaseModel):
     metric_name = CharField()
     labels_hash = CharField()  # Hash of labels for uniqueness
     labels = TextField(null=True)  # JSON for display/filtering
-    value_type = CharField()  # "int" or "float"
     created_at = IntegerField()
 
     class Meta:
@@ -131,16 +130,15 @@ class MetricSeries(BaseModel):
 
     @classmethod
     def get_or_create_series(
-        cls, 
-        client_id: int, 
-        metric_name: str, 
-        labels: Optional[str], 
-        value_type: str
+        cls,
+        client_id: int,
+        metric_name: str,
+        labels: Optional[str]
     ) -> "MetricSeries":
         """Get existing series or create new one."""
         import hashlib
         import json
-        
+
         # Create consistent hash of labels
         if labels:
             labels_dict = json.loads(labels) if isinstance(labels, str) else labels
@@ -148,11 +146,11 @@ class MetricSeries(BaseModel):
         else:
             labels_str = ""
         labels_hash = hashlib.md5(labels_str.encode()).hexdigest()[:16]
-        
+
         try:
             return cls.get(
-                (cls.client == client_id) & 
-                (cls.metric_name == metric_name) & 
+                (cls.client == client_id) &
+                (cls.metric_name == metric_name) &
                 (cls.labels_hash == labels_hash)
             )
         except cls.DoesNotExist:
@@ -161,7 +159,6 @@ class MetricSeries(BaseModel):
                 metric_name=metric_name,
                 labels_hash=labels_hash,
                 labels=labels_str if labels_str else None,
-                value_type=value_type,
                 created_at=int(time.time())
             )
 

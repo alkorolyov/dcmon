@@ -78,21 +78,18 @@ def sample_metrics(test_db, sample_client):
         client_id=sample_client.id,
         metric_name="cpu_usage_percent",
         labels=None,
-        value_type="float"
     )
 
     temp_series = MetricSeries.get_or_create_series(
         client_id=sample_client.id,
         metric_name="ipmi_temp_celsius",
         labels='{"sensor": "CPU Temp"}',
-        value_type="int"
     )
 
     vrm_series = MetricSeries.get_or_create_series(
         client_id=sample_client.id,
         metric_name="ipmi_temp_celsius",
         labels='{"sensor": "VRM Temp"}',
-        value_type="int"
     )
 
     # Create metric points (10 data points spanning 5 minutes)
@@ -150,14 +147,12 @@ def sample_counter_metrics(test_db, sample_client):
         client_id=sample_client.id,
         metric_name="network_receive_bytes_total",
         labels='{"interface": "eth0"}',
-        value_type="int"
     )
 
     tx_series = MetricSeries.get_or_create_series(
         client_id=sample_client.id,
         metric_name="network_transmit_bytes_total",
         labels='{"interface": "eth0"}',
-        value_type="int"
     )
 
     # Create increasing counter values (simulating network traffic)
@@ -202,14 +197,12 @@ def sample_disk_metrics(test_db, sample_client):
         client_id=sample_client.id,
         metric_name="fs_used_bytes",
         labels='{"mountpoint": "/"}',
-        value_type="int"
     )
 
     total_series = MetricSeries.get_or_create_series(
         client_id=sample_client.id,
         metric_name="fs_total_bytes",
         labels='{"mountpoint": "/"}',
-        value_type="int"
     )
 
     # Create points: 75% disk usage

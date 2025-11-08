@@ -440,14 +440,12 @@ class TestGetRateTimeseries:
             client_id=sample_client.id,
             metric_name="disk_read_bytes_total",
             labels='{"device": "nvme0n1"}',
-            value_type="float"
         )
 
         write_series = MetricSeries.get_or_create_series(
             client_id=sample_client.id,
             metric_name="disk_write_bytes_total",
             labels='{"device": "nvme0n1"}',
-            value_type="float"
         )
 
         # Create data with large values (18TB read, 9TB write)
