@@ -32,10 +32,53 @@ class ChartManager {
         this.globalTimeRange = { start: null, end: null };
         this.isUpdatingRange = false;
 
-        // Grafana-style colors
-        this.colors = ["#73bf69", "#f2495c", "#5794f2", "#ff9830", "#9d7bd8", "#70dbed"];
+        // Classic Grafana color palette (authentic colors from grafana/grafana source)
+        // Exact colors from packages/grafana-ui/src/utils/colors.ts
+        this.colors = [
+            "#7EB26D",  // Green
+            "#EAB839",  // Yellow
+            "#6ED0E0",  // Cyan
+            "#EF843C",  // Orange
+            "#E24D42",  // Red
+            "#1F78C1",  // Blue
+            "#BA43A9",  // Purple/Magenta
+            "#705DA0",  // Violet
+            "#508642",  // Dark Green
+            "#CCA300",  // Dark Yellow/Gold
+            "#447EBC",  // Medium Blue
+            "#C15C17",  // Brown/Rust
+            "#890F02",  // Dark Red
+            "#0A437C",  // Navy Blue
+            "#6D1F62",  // Dark Purple
+            "#584477"   // Deep Violet
+        ];
+
+        // Persistent client-to-color mapping
+        // Maps client_id -> color index to ensure same machine always gets same color
+        this.clientColorMap = new Map();
 
         console.log('ChartManager initialized');
+    }
+
+    /**
+     * Get or assign a persistent color for a client
+     * Ensures the same client always gets the same color across all charts
+     * @param {string} clientId - The client ID
+     * @returns {string} - The color hex code
+     */
+    getClientColor(clientId) {
+        // Check if we already have a color assigned to this client
+        if (this.clientColorMap.has(clientId)) {
+            const colorIndex = this.clientColorMap.get(clientId);
+            return this.colors[colorIndex];
+        }
+
+        // Assign a new color based on the number of clients already registered
+        const newColorIndex = this.clientColorMap.size % this.colors.length;
+        this.clientColorMap.set(clientId, newColorIndex);
+
+        console.log(`Assigned color ${this.colors[newColorIndex]} (index ${newColorIndex}) to client ${clientId}`);
+        return this.colors[newColorIndex];
     }
 
     /**
@@ -473,25 +516,23 @@ class ChartManager {
         const uplotData = [sortedTimestamps]; // x-axis
         const seriesConfig = [{}]; // x-axis config (empty)
         
-        // Process each client's data
-        let colorIndex = 0;
+        // Process each client's data with persistent color assignment
         for (const [clientId, clientPoints] of Object.entries(backendData.data)) {
             // Create a map of timestamp -> value for this client
             const pointMap = new Map(clientPoints.map(p => [p.timestamp, p.value]));
-            
+
             // Create synchronized series with nulls for missing timestamps
             const series = sortedTimestamps.map(timestamp => pointMap.get(timestamp) ?? null);
             uplotData.push(series);
-            
-            // Add series configuration
+
+            // Add series configuration with persistent color
             seriesConfig.push({
                 label: backendData.clients[clientId] || `Client ${clientId}`,
-                stroke: this.colors[colorIndex % this.colors.length],
+                stroke: this.getClientColor(clientId),  // Use persistent color mapping
                 width: 1, // THINNER LINES
                 show: true,
                 spanGaps: true // Connect lines across missing data points
             });
-            colorIndex++;
         }
         
         return {

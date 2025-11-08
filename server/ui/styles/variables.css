@@ -30,13 +30,23 @@
     --border-light: #f0f1f4;
     --border-dark: #c4c7cc;
     
-    /* Chart Colors */
-    --chart-green: #73bf69;
-    --chart-red: #f2495c;
-    --chart-blue: #5794f2;
-    --chart-orange: #ff9830;
-    --chart-purple: #9d7bd8;
-    --chart-cyan: #70dbed;
+    /* Chart Colors - Classic Grafana palette (authentic from grafana/grafana source) */
+    --chart-green: #7EB26D;
+    --chart-yellow: #EAB839;
+    --chart-cyan: #6ED0E0;
+    --chart-orange: #EF843C;
+    --chart-red: #E24D42;
+    --chart-blue: #1F78C1;
+    --chart-purple: #BA43A9;
+    --chart-violet: #705DA0;
+    --chart-dark-green: #508642;
+    --chart-dark-yellow: #CCA300;
+    --chart-medium-blue: #447EBC;
+    --chart-brown: #C15C17;
+    --chart-dark-red: #890F02;
+    --chart-navy: #0A437C;
+    --chart-dark-purple: #6D1F62;
+    --chart-deep-violet: #584477;
     
     /* Status Colors */
     --status-good: rgba(115, 191, 105, 0.15);
