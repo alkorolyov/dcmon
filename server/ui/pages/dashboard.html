@@ -105,19 +105,19 @@
         <div class="section">
             <h2 class="section-title">System Metrics</h2>
             <div class="charts-section">
+                <!-- VastAI Rental Status Timeline -->
+                {% with timeline_id='vastai-rental-timeline' %}
+                    {% include "timeline/state_timeline.html" %}
+                {% endwith %}
+
                 <!-- GPU Temperature Chart -->
                 {% with chart_id='gpu-temp-chart', chart_title='GPU Temperature' %}
                     {% include "charts/chart_container.html" %}
                 {% endwith %}
-                
+
                 <!-- CPU Temperature Chart -->
                 {% with chart_id='cpu-temp-chart', chart_title='CPU Temperature' %}
                     {% include "charts/chart_container.html" %}
-                {% endwith %}
-
-                <!-- VastAI Rental Status Timeline -->
-                {% with timeline_id='vastai-rental-timeline' %}
-                    {% include "timeline/state_timeline.html" %}
                 {% endwith %}
 
                 <!-- Memory Usage Chart -->
