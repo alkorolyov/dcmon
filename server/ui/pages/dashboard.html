@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="{{ url_for('static', path='ui/components/charts/chart_styles.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='ui/components/tables/table_styles.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='ui/components/controls/control_styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='ui/components/timeline/state_timeline.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -113,7 +114,12 @@
                 {% with chart_id='cpu-temp-chart', chart_title='CPU Temperature' %}
                     {% include "charts/chart_container.html" %}
                 {% endwith %}
-                
+
+                <!-- VastAI Rental Status Timeline -->
+                {% with timeline_id='vastai-rental-timeline' %}
+                    {% include "timeline/state_timeline.html" %}
+                {% endwith %}
+
                 <!-- Memory Usage Chart -->
                 {% with chart_id='memory-usage-chart', chart_title='Memory Usage' %}
                     {% include "charts/chart_container.html" %}
@@ -166,6 +172,7 @@
     <!-- Component Scripts -->
     <script src="{{ url_for('static', path='ui/components/charts/chart_manager.js') }}"></script>
     <script src="{{ url_for('static', path='ui/components/charts/timeseries_chart.js') }}"></script>
+    <script src="{{ url_for('static', path='ui/components/timeline/state_timeline.js') }}"></script>
     <script src="{{ url_for('static', path='ui/components/tables/clients_table.js') }}"></script>
     <script src="{{ url_for('static', path='ui/components/controls/dashboard_controls.js') }}"></script>
     <script src="{{ url_for('static', path='ui/components/modals/client_detail_modal.js') }}"></script>
@@ -200,10 +207,26 @@
             refreshInterval: 30000,
             autoRefresh: true
         });
-        
+
         // Initialize charts (uses singleton pattern)
         initializeCharts();
-        
+
+        // Initialize VastAI rental timeline
+        window.vastaiTimeline = new StateTimeline('vastai-rental-timeline', {
+            metricName: 'vast_rentals_ondemand',
+            title: 'VastAI Rental Status',
+            height: 200,
+            colors: {
+                0: '#dc3545',  // Red for not rented
+                1: '#28a745'   // Green for rented
+            },
+            stateLabels: {
+                0: 'Not Rented',
+                1: 'Rented'
+            }
+        });
+        window.vastaiTimeline.initialize();
+
         window.dashboardInitialized = true;
         console.log('Dashboard initialized successfully');
     }

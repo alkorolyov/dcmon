@@ -1,0 +1,187 @@
+/**
+ * State Timeline Component Styles
+ *
+ * Grafana-style state timeline visualization
+ */
+
+/* Timeline Container - Match chart container sizing */
+.state-timeline-container {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-base);
+    padding: 0;
+    width: calc(50% - 4px); /* Same as chart-container: two per row */
+    min-width: 400px;
+    box-sizing: border-box;
+    transition: all var(--transition-base);
+}
+
+/* Full width variant (for standalone timeline section) */
+.state-timeline-container.full-width {
+    width: 100%;
+}
+
+/* Timeline Wrapper */
+.timeline-wrapper {
+    padding: 12px;
+    position: relative;
+    min-height: 250px; /* Match chart total height */
+}
+
+/* Timeline Header */
+.timeline-header {
+    margin-bottom: 8px;
+}
+
+.timeline-title {
+    font-family: var(--font-family);
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-primary);
+    margin: 0;
+    padding: 0 0 0 8px;
+    text-align: left;
+}
+
+/* Canvas Container */
+.timeline-canvas-container {
+    position: relative;
+    width: 100%;
+    margin-bottom: 8px;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+}
+
+.timeline-canvas-container canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    cursor: crosshair;
+}
+
+/* Timeline Legend */
+.timeline-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 4px 8px;
+    font-family: var(--font-family);
+    font-size: var(--font-size-sm);
+    justify-content: flex-start;
+    align-items: center;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.legend-label {
+    color: var(--text-primary);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+}
+
+/* Tooltip */
+.timeline-tooltip {
+    position: fixed;
+    z-index: var(--z-tooltip);
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    font-family: var(--font-family);
+    font-size: var(--font-size-sm);
+    pointer-events: none;
+    box-shadow: var(--shadow-lg);
+    max-width: 300px;
+    white-space: nowrap;
+}
+
+.tooltip-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.tooltip-content > div {
+    line-height: 1.4;
+}
+
+.tooltip-content strong {
+    font-weight: var(--font-weight-semibold);
+    color: #fff;
+}
+
+/* Hover Effects */
+.state-timeline-container:hover {
+    border-color: var(--primary-color);
+    box-shadow: var(--shadow-base);
+}
+
+/* Loading State */
+.timeline-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 250px;
+    color: var(--text-secondary);
+    font-family: var(--font-family);
+    font-size: var(--font-size-md);
+}
+
+.timeline-loading-spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--border-color);
+    border-top: 2px solid var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 12px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Empty State */
+.timeline-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 250px;
+    color: var(--text-secondary);
+    font-family: var(--font-family);
+    font-size: var(--font-size-md);
+    font-style: italic;
+}
+
+/* Responsive: Full width on smaller screens */
+@media (max-width: 900px) {
+    .state-timeline-container {
+        width: 100%;
+        min-width: unset;
+    }
+}
+
+/* Integration with charts-section grid */
+.charts-section .state-timeline-container {
+    /* Inherits two-per-row layout from .charts-section */
+    width: calc(50% - 4px);
+}
+
+@media (max-width: 900px) {
+    .charts-section .state-timeline-container {
+        width: 100%;
+    }
+}

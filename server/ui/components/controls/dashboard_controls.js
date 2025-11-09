@@ -328,12 +328,17 @@ class DashboardControls {
         if (window.clientsTable) {
             window.clientsTable.refreshTable();
         }
-        
+
         // Refresh charts with auto-refresh optimization
         if (window.chartManager) {
             window.chartManager.refreshAll(true); // true = isAutoRefresh
         }
-        
+
+        // Refresh VastAI timeline
+        if (window.vastaiTimeline) {
+            window.vastaiTimeline.refresh();
+        }
+
         // Trigger HTMX refresh for tables
         const refreshElements = document.querySelectorAll('[hx-get*="refresh"]');
         refreshElements.forEach(element => {
@@ -349,9 +354,14 @@ class DashboardControls {
     refreshChartsWithTimeRange(range) {
         // Convert range to seconds for API
         const seconds = this.parseTimeRangeToSeconds(range);
-        
+
         // Update time range with smart caching
         window.chartManager.updateTimeRange(seconds);
+
+        // Dispatch custom event for other components (e.g., timeline)
+        document.dispatchEvent(new CustomEvent('timeRangeChanged', {
+            detail: { range, seconds }
+        }));
     }
     
     /**

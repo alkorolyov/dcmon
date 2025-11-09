@@ -566,35 +566,45 @@ class ChartManager {
             } else {
                 // The container IS the chart-content element (template has id="{{ chart_id }}" on chart-content div)
                 const targetElement = chartInfo.container;
-                
+
                 console.log(`Creating new uPlot chart for ${chartId}:`, {
                     target: targetElement,
                     targetSize: { width: targetElement.offsetWidth, height: targetElement.offsetHeight },
                     config: chartInfo.uplotConfig,
                     dataPoints: uplotData.data[0]?.length || 0
                 });
-                
+
                 try {
                     chartInfo.chart = new uPlot(
                         chartInfo.uplotConfig,
                         uplotData.data,
                         targetElement
                     );
-                    
+
                     console.log(`uPlot chart created for ${chartId}:`, {
                         chartObject: chartInfo.chart,
-                        canvasSize: { 
-                            width: chartInfo.chart.over?.offsetWidth, 
-                            height: chartInfo.chart.over?.offsetHeight 
+                        canvasSize: {
+                            width: chartInfo.chart.over?.offsetWidth,
+                            height: chartInfo.chart.over?.offsetHeight
                         }
                     });
+
+                    // Set initial time scale to requested range, not auto-scaled data range
+                    // This ensures all charts start with the same time range
+                    if (uplotData.data[0] && uplotData.data[0].length > 0) {
+                        const seconds = chartInfo.config.apiParams?.seconds || 86400;
+                        const now = Math.floor(Date.now() / 1000);
+                        const startTime = now - seconds;
+                        chartInfo.chart.setScale('x', { min: startTime, max: now });
+                        console.log(`Set initial time range for ${chartId}: ${seconds}s (${startTime} to ${now})`);
+                    }
                 } catch (error) {
                     console.error(`Failed to create uPlot chart for ${chartId}:`, error);
                     this.showChartError(chartId, `Chart creation failed: ${error.message}`);
                     return;
                 }
             }
-            
+
             // Hide loading/error states
             this.hideChartStates(chartId);
             
@@ -611,17 +621,22 @@ class ChartManager {
      */
     syncTimeRange(start, end) {
         if (this.isUpdatingRange) return;
-        
+
         this.isUpdatingRange = true;
         this.globalTimeRange = { start, end };
-        
+
         // Update all charts with new time range
         for (const [chartId, chartInfo] of this.charts) {
             if (chartInfo.chart && chartInfo.chart.scales.x) {
                 chartInfo.chart.setScale('x', { min: start, max: end });
             }
         }
-        
+
+        // Dispatch custom event for other components (e.g., timeline) to sync
+        document.dispatchEvent(new CustomEvent('chartZoomChanged', {
+            detail: { start, end }
+        }));
+
         this.isUpdatingRange = false;
         console.log(`Time range synced: ${new Date(start * 1000).toISOString()} to ${new Date(end * 1000).toISOString()}`);
     }
@@ -732,32 +747,29 @@ class ChartManager {
     filterAndRenderCachedData(chartId, chartInfo, seconds) {
         const now = Math.floor(Date.now() / 1000);
         const startTime = now - seconds;
-        
+
         // Always filter from original full cached data, not previously filtered data
-        const filteredData = { 
+        const filteredData = {
             ...chartInfo.cachedData,
             data: {}
         };
-        
+
         Object.keys(chartInfo.cachedData.data).forEach(clientId => {
             filteredData.data[clientId] = chartInfo.cachedData.data[clientId].filter(
                 point => point.timestamp >= startTime
             );
         });
-        
+
         console.log(`Filtered from ${Object.values(chartInfo.cachedData.data).reduce((sum, arr) => sum + arr.length, 0)} to ${Object.values(filteredData.data).reduce((sum, arr) => sum + arr.length, 0)} points`);
-        
+
         // Convert and re-render chart
         const uplotData = this.prepareUplotData(filteredData);
         chartInfo.chart.setData(uplotData.data);
-        
-        // Force x-axis to rescale to new time range
-        if (uplotData.data[0] && uplotData.data[0].length > 0) {
-            const minTime = Math.min(...uplotData.data[0]);
-            const maxTime = Math.max(...uplotData.data[0]);
-            chartInfo.chart.setScale('x', { min: minTime, max: maxTime });
-        }
-        
+
+        // Set x-axis to the REQUESTED time range, not the data range
+        // This ensures consistent zoom level across all charts and timeline
+        chartInfo.chart.setScale('x', { min: startTime, max: now });
+
         console.log(`Chart ${chartId} re-rendered with filtered data for ${seconds} seconds`);
     }
     
