@@ -561,8 +561,23 @@ class ChartManager {
             
             // Create or update uPlot instance
             if (chartInfo.chart) {
+                // Preserve current time scale before updating data
+                const currentScale = chartInfo.chart.scales.x;
+                const preservedMin = currentScale.min;
+                const preservedMax = currentScale.max;
+
+                // Prevent sync during data update (setData triggers auto-scale which would fire the hook)
+                this.isUpdatingRange = true;
                 chartInfo.chart.setData(uplotData.data);
-                console.log(`Chart ${chartId} updated with existing uPlot instance`);
+
+                // Restore the time scale after setData (which auto-scales to data range)
+                if (preservedMin !== undefined && preservedMax !== undefined) {
+                    chartInfo.chart.setScale('x', { min: preservedMin, max: preservedMax });
+                    console.log(`Chart ${chartId} updated and scale preserved: ${preservedMin} to ${preservedMax}`);
+                } else {
+                    console.log(`Chart ${chartId} updated with existing uPlot instance`);
+                }
+                this.isUpdatingRange = false;
             } else {
                 // The container IS the chart-content element (template has id="{{ chart_id }}" on chart-content div)
                 const targetElement = chartInfo.container;
